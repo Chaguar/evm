@@ -63,3 +63,20 @@ func TestQueryServiceKVSNewSnapshot(t *testing.T) {
 		t.Fatalf("a historical snapshot opened a view")
 	}
 }
+
+// A view reports the height the store had seen when it was opened.
+func TestQueryServiceKVSSnapshotBlockNumber(t *testing.T) {
+	kvs := NewQueryServiceKVS(&fakeQueryClient{})
+	kvs.SetBlockNumber(5)
+
+	snap, err := kvs.NewSnapshot(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer snap.Close()
+	kvs.SetBlockNumber(6)
+
+	if got := snap.BlockNumber(); got != 5 {
+		t.Fatalf("BlockNumber = %d, want 5", got)
+	}
+}

@@ -68,6 +68,8 @@ type ExtendedStateDB interface {
 // ReadStore is the read interface required to back a StateDB.
 type ReadStore interface {
 	Get(namespace, key string) (*blocks.WriteRecord, error)
+	// BlockNumber is the committed height this view reads at.
+	BlockNumber() uint64
 	Close() error
 }
 

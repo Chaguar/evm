@@ -22,6 +22,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/eth/filters"
 	"github.com/ethereum/go-ethereum/rpc"
+	eapi "github.com/hyperledger/fabric-x-evm/endorser/api"
 	apifilters "github.com/hyperledger/fabric-x-evm/gateway/api/filters"
 	"github.com/hyperledger/fabric-x-evm/gateway/domain"
 )
@@ -855,6 +856,26 @@ func TestCall_ArgsToCallMsgError(t *testing.T) {
 	var rpcErr rpc.Error
 	if !errors.As(err, &rpcErr) || rpcErr.ErrorCode() != -32602 {
 		t.Fatalf("want InvalidParams (-32602), got %T (%v)", err, err)
+	}
+}
+
+// eth_call on pending runs as the next block; latest stays latest (nil).
+func TestCall_PendingRunsAsNextBlock(t *testing.T) {
+	backend := &stubBackend{}
+	api := NewEthAPI(backend)
+
+	if _, err := api.Call(context.Background(), map[string]any{}, rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)); err != nil {
+		t.Fatal(err)
+	}
+	if !eapi.IsPending(backend.callBlock) {
+		t.Errorf("pending: block = %v, want PendingBlock()", backend.callBlock)
+	}
+
+	if _, err := api.Call(context.Background(), map[string]any{}, latestBlockRef); err != nil {
+		t.Fatal(err)
+	}
+	if backend.callBlock != nil {
+		t.Errorf("latest: block = %v, want nil", backend.callBlock)
 	}
 }
 

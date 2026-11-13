@@ -23,6 +23,7 @@ import (
 	"github.com/ethereum/go-ethereum/eth/filters"
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/hyperledger/fabric-lib-go/common/flogging"
+	eapi "github.com/hyperledger/fabric-x-evm/endorser/api"
 	apifilters "github.com/hyperledger/fabric-x-evm/gateway/api/filters"
 	"github.com/hyperledger/fabric-x-evm/gateway/api/rpcerr"
 	"github.com/hyperledger/fabric-x-evm/gateway/domain"
@@ -412,6 +413,10 @@ func (api *EthAPI) Call(ctx context.Context, args map[string]any, block rpc.Bloc
 	if err != nil {
 		logger.Warnf("EthAPI.Call() returning error: %v", err)
 		return nil, err
+	}
+	// Pending reads the latest state but runs as the next block.
+	if num, ok := block.Number(); ok && num == rpc.PendingBlockNumber {
+		blockNum = eapi.PendingBlock()
 	}
 	logger.Debugf("EthAPI.Call() using blockNum %d", blockNum)
 	ret, err := api.b.CallContract(ctx, callMsg, blockNum)
