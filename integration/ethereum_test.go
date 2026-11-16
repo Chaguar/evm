@@ -37,6 +37,7 @@ import (
 	"github.com/hyperledger/fabric-x-evm/gateway/storage/trie"
 	sdk "github.com/hyperledger/fabric-x-sdk"
 	"github.com/hyperledger/fabric-x-sdk/blocks"
+	"github.com/hyperledger/fabric-x-sdk/endorsement"
 	"google.golang.org/grpc/grpclog"
 	"google.golang.org/protobuf/proto"
 )
@@ -235,9 +236,10 @@ func runEthereumTestConfig(t *testing.T, stateTest *StateTest, subtest StateSubt
 		t.Fatalf("Failed to build transaction: %v", err)
 	}
 
-	// Create EVMConfig to pass to test harness
+	// Charge gas like Ethereum does, so fee accounting is checked too.
 	evmConfig := execution.EVMConfig{
 		ChainConfig: config,
+		ChargeGas:   true,
 	}
 
 	// Create test harness with local backend and state priming, passing evmConfig and block context
@@ -463,16 +465,32 @@ type ethereumTestHarness struct {
 	*TestHarness
 }
 
+// fixtureEngine is the production engine, except that it runs every transaction
+// in one fixture's block context (fork rules, coinbase, base fee, ...) instead
+// of the gateway's block time and a default context.
+type fixtureEngine struct {
+	*execution.EVMEngine
+	blockCtx vm.BlockContext
+}
+
+func (e *fixtureEngine) Execute(_ context.Context, tx *types.Transaction, _ uint64) (endorsement.ExecutionResult, error) {
+	// nil reads the latest state, as production does; the fixture's block
+	// number reaches the EVM through BlockCtx.
+	ex, err := e.NewTxExecutor(nil, e.blockCtx.Time)
+	if err != nil {
+		return endorsement.ExecutionResult{}, err
+	}
+	defer ex.Close()
+	ex.BlockCtx = e.blockCtx
+	return execution.Endorse(ex, tx, e.blockCtx.Time)
+}
+
 // fixtureEndorserFactory creates production endorsers whose engine runs every
-// transaction in blockCtx, the fixture's block context (fork rules, coinbase,
-// base fee, ...), and charges gas like Ethereum does instead of executing for free.
+// transaction in blockCtx, the fixture's block context.
 func fixtureEndorserFactory(blockCtx *vm.BlockContext) EndorserFactory {
 	return func(t *testing.T, ecfg econf.Endorser, channel, namespace string, evmConfig execution.EVMConfig, protocol string) EndorserComponents {
 		db, builder, end := NewEndorser(t, ecfg, channel, namespace, evmConfig, protocol)
-		end.Engine.(*execution.EVMEngine).SetExecutorHook(func(ex *execution.Executor) {
-			ex.BlockCtx = *blockCtx
-			ex.FreeGas = false
-		})
+		end.Engine = &fixtureEngine{EVMEngine: end.Engine.(*execution.EVMEngine), blockCtx: *blockCtx}
 		return EndorserComponents{KVS: db, Builder: builder, Service: end}
 	}
 }
