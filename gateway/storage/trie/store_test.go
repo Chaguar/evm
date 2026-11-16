@@ -335,6 +335,18 @@ func TestCommit_MalformedKey(t *testing.T) {
 	}
 }
 
+func TestCommit_MalformedNonce(t *testing.T) {
+	ts := newTestStore(t)
+	addr := common.HexToAddress("0x3333")
+	block := makeBlock(1, makeTx(true, blocks.KVWrite{Key: "acc:" + addr.Hex() + ":nonce", Value: []byte{0x01}}))
+	if _, err := ts.Commit(t.Context(), block); err == nil {
+		t.Fatal("a nonce that is not 8 bytes must fail the commit")
+	}
+	if ts.Root() != types.EmptyRootHash {
+		t.Error("a failed commit must leave the root unchanged")
+	}
+}
+
 func TestCommit_MultipleNamespaces(t *testing.T) {
 	ts := newTestStore(t)
 	addr1 := common.HexToAddress("0xaaaa")

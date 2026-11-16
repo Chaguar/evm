@@ -8,6 +8,7 @@ package common
 
 import (
 	"encoding/binary"
+	"fmt"
 	"math/big"
 	"strings"
 
@@ -92,12 +93,16 @@ func EncodeNonce(nonce uint64) []byte {
 	return b
 }
 
-// DecodeNonce reverses EncodeNonce; empty decodes as zero.
-func DecodeNonce(b []byte) uint64 {
-	if len(b) == 0 {
-		return 0
+// DecodeNonce reverses EncodeNonce; empty decodes as zero. Any length other
+// than 0 or 8 is an error.
+func DecodeNonce(b []byte) (uint64, error) {
+	switch len(b) {
+	case 0:
+		return 0, nil
+	case 8:
+		return binary.BigEndian.Uint64(b), nil
 	}
-	return binary.BigEndian.Uint64(b)
+	return 0, fmt.Errorf("nonce: want 8 bytes, got %d", len(b))
 }
 
 // EncodeStorage is the raw 32 bytes of the value, or nil for zero, which the

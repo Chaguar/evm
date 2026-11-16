@@ -392,7 +392,11 @@ func (s *StateDB) GetNonce(addr common.Address) uint64 {
 	if err != nil {
 		panic(fmt.Errorf("GetNonce failed: %w", err))
 	}
-	return fxcommon.DecodeNonce(val)
+	nonce, err := fxcommon.DecodeNonce(val)
+	if err != nil {
+		panic(fmt.Errorf("GetNonce %s: %w", addr, err))
+	}
+	return nonce
 }
 
 // SetNonce sets the nonce of an account.

@@ -41,8 +41,17 @@ func TestStateValuesRoundTrip(t *testing.T) {
 		}
 	}
 	for _, nonce := range []uint64{0, 1, 1<<64 - 1} {
-		if got := DecodeNonce(EncodeNonce(nonce)); got != nonce {
-			t.Errorf("nonce %d: got %d", nonce, got)
+		if got, err := DecodeNonce(EncodeNonce(nonce)); err != nil || got != nonce {
+			t.Errorf("nonce %d: got %d, %v", nonce, got, err)
+		}
+	}
+	if got, err := DecodeNonce(nil); err != nil || got != 0 {
+		t.Errorf("empty nonce: got %d, %v", got, err)
+	}
+	// Short values would panic in binary.BigEndian; long ones would lose bytes.
+	for _, n := range []int{1, 7, 9, 32} {
+		if _, err := DecodeNonce(make([]byte, n)); err == nil {
+			t.Errorf("DecodeNonce accepted a %d-byte value", n)
 		}
 	}
 	// A value below 0x10 is where an ASCII-hex decoder reads a raw byte as zero.

@@ -98,7 +98,9 @@ func (s *Store) apply(writes []blocks.KVWrite, rules params.Rules, number uint64
 		return common.Hash{}, fmt.Errorf("open state at root %s: %w", s.root, err)
 	}
 	for _, w := range writes {
-		applyWrite(sdb, w)
+		if err := applyWrite(sdb, w); err != nil {
+			return common.Hash{}, fmt.Errorf("block %d: write %q: %w", number, w.Key, err)
+		}
 	}
 
 	newRoot, err := sdb.Commit(rules, number)
@@ -139,10 +141,10 @@ func (s *Store) Close() {
 // applyWrite interprets a Fabric KVWrite and applies it to the StateDB, decoding
 // it with the same codec the endorser encodes it with (fc.ParseStateKey and the
 // fc.Decode functions). Keys that are not state keys are ignored.
-func applyWrite(sdb *state.StateDB, w blocks.KVWrite) {
+func applyWrite(sdb *state.StateDB, w blocks.KVWrite) error {
 	key, ok := fc.ParseStateKey(w.Key)
 	if !ok {
-		return
+		return nil
 	}
 	// A delete decodes like an empty value: zero, or no code.
 	value := w.Value
@@ -152,14 +154,19 @@ func applyWrite(sdb *state.StateDB, w blocks.KVWrite) {
 
 	if key.Storage {
 		sdb.SetState(key.Address, key.Slot, fc.DecodeStorage(value))
-		return
+		return nil
 	}
 	switch key.Field {
 	case fc.FieldBalance:
 		sdb.SetBalance(key.Address, fc.DecodeBalance(value), tracing.BalanceChangeUnspecified)
 	case fc.FieldNonce:
-		sdb.SetNonce(key.Address, fc.DecodeNonce(value), tracing.NonceChangeUnspecified)
+		nonce, err := fc.DecodeNonce(value)
+		if err != nil {
+			return err
+		}
+		sdb.SetNonce(key.Address, nonce, tracing.NonceChangeUnspecified)
 	case fc.FieldCode:
 		sdb.SetCode(key.Address, value, tracing.CodeChangeUnspecified)
 	}
+	return nil
 }
