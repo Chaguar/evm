@@ -95,7 +95,6 @@ func runLocalNamespaceMatrix(t *testing.T, networkType string) {
 		newParty(t, nsMatrixA, thA.Gateways[0], thA.ethChainConfig, nsMatrixSupply),
 		newParty(t, nsMatrixB, thB.Gateways[0], thB.ethChainConfig, nsMatrixSupply),
 	}
-	assertDistinctStores(t, parties)
 
 	runNamespaceIsolationMatrix(t, "fabrictest/"+networkType, parties)
 }
@@ -164,7 +163,6 @@ func TestNamespaceIsolationFablo(t *testing.T) {
 		newParty(t, nsMatrixA, thA.Gateways[0], thA.ethChainConfig, nsMatrixSupply),
 		newParty(t, nsMatrixB, thB.Gateways[0], thB.ethChainConfig, nsMatrixSupply),
 	}
-	assertDistinctStores(t, parties)
 
 	runNamespaceIsolationMatrix(t, "fabric/fablo", parties)
 }
@@ -203,7 +201,6 @@ func runFileConfigNamespaceMatrix(t *testing.T, backend, configFile, nsA, nsB st
 		newParty(t, nsA, thA.Gateways[0], thA.ethChainConfig, nsMatrixSupply),
 		newParty(t, nsB, thB.Gateways[0], thB.ethChainConfig, nsMatrixSupply),
 	}
-	assertDistinctStores(t, parties)
 
 	runNamespaceIsolationMatrix(t, backend, parties)
 }

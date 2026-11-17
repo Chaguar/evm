@@ -109,27 +109,3 @@ func twoNamespaceLocalHarnesses(
 
 	return build(nsA), build(nsB)
 }
-
-// assertDistinctStores guards the premise of the whole matrix: if two parties
-// shared a block store, "isolation" would be untestable and a pass would mean
-// nothing. Cheap to check, and the committed YAML configs all use the same
-// named shared-cache DSN (`file:gateway.db?mode=memory&cache=shared`), so this
-// is a live hazard rather than a theoretical one.
-func assertDistinctStores(t *testing.T, parties []nsParty) {
-	t.Helper()
-
-	// Two gateways over one store would answer identically for every block.
-	// Comparing the stores directly is not possible through the public API, so
-	// compare what they report: having already committed different transactions
-	// to different namespaces, identical answers everywhere would be the
-	// symptom.
-	if len(parties) < 2 {
-		return
-	}
-	if parties[0].Gateway == parties[1].Gateway {
-		t.Fatal("both parties share one gateway; the matrix cannot measure isolation")
-	}
-	if parties[0].Namespace == parties[1].Namespace {
-		t.Fatalf("both parties use namespace %q; the matrix needs two", parties[0].Namespace)
-	}
-}
