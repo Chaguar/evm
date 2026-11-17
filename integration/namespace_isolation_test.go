@@ -32,9 +32,9 @@ import (
 //	                                under `go test ./integration` with no
 //	                                network, so they are the fast feedback loop.
 //	TestNamespaceIsolationFabricX — the fabric-x test committer. Needs
-//	                                `make start-x-batched` (block size > 1; the
-//	                                default start-x cuts one tx per block, so
-//	                                mixed blocks are unreachable there).
+//	                                `make start-x`, which creates the second
+//	                                namespace and runs the orderer with a block
+//	                                size of 2.
 //	TestNamespaceIsolationFablo   — a running Fablo network with two chaincodes.
 //
 // What each backend has to satisfy is listed at the top of
@@ -46,13 +46,15 @@ import (
 // Large enough that the matrix's transfers never exhaust it.
 var nsMatrixSupply = big.NewInt(1_000_000)
 
-// nsMatrixBatching batches up to 4 transactions into a block, waiting briefly
-// for a partial batch to fill. Without this fabrictest cuts a block per
-// transaction (BlockCutTime 0 = cut immediately) and the mixed-block case —
-// the one that produces index holes — cannot occur.
+// nsMatrixBatching mirrors the committer fixture's block cutting
+// (SC_ORDERER_BLOCK_SIZE / SC_ORDERER_BLOCK_TIMEOUT in compose.fabric-x.yml):
+// two transactions to a block, so a pair submitted at once fills it and cuts
+// straight away, and a short timeout for the lone transactions. Without any
+// batching fabrictest cuts a block per transaction (BlockCutTime 0 = cut
+// immediately) and no block can carry both namespaces.
 var nsMatrixBatching = fabrictest.Config{
-	MaxTxPerBlock: 4,
-	BlockCutTime:  250 * time.Millisecond,
+	MaxTxPerBlock: 2,
+	BlockCutTime:  100 * time.Millisecond,
 }
 
 // namespaces used by the mock backends. fabrictest does not need them declared
@@ -74,12 +76,12 @@ func TestNamespaceIsolationLocal(t *testing.T) {
 // TestNamespaceIsolationLocalX runs the matrix on fabrictest with fabric-x
 // encoding, so the handler chain is fed by hybridx.
 //
-// Note on what this can and cannot show: fabrictest's StreamBlocks drops a
-// block whose events all filter out, so on this backend the notification path
-// never delivers an empty-after-filter block while its own delivery path does.
-// The real committer is documented to send every block unconditionally (see
-// synchronizer.NewDelivery's comment) — comparing this output with
-// TestNamespaceIsolationFabricX is how we find out whether that holds.
+// As of the SDK bump in #453, fabrictest's StreamBlocks sends a BlockEvent for
+// every committed block even when none of its transactions match the request's
+// filters, which is what the real committer does. The empty-after-filter block
+// therefore reaches the handler chain on both the notification and the delivery
+// path here, and TestNamespaceIsolationFabricX checks that the real committer
+// agrees rather than being the only place the case can be seen at all.
 func TestNamespaceIsolationLocalX(t *testing.T) {
 	grpclog.SetLoggerV2(grpclog.NewLoggerV2(io.Discard, os.Stderr, os.Stderr))
 	runLocalNamespaceMatrix(t, "fabric-x")
@@ -102,12 +104,10 @@ func runLocalNamespaceMatrix(t *testing.T, networkType string) {
 // TestNamespaceIsolationFabricX runs the matrix against the real fabric-x test
 // committer, which is the backend whose answers we actually care about.
 //
-// Requires `make start-x-batched`: the default start-x runs the mock orderer
-// with SC_ORDERER_BLOCK_SIZE=1, which makes mixed blocks — and therefore index
-// holes — impossible. The matrix reports loudly when it detects that, so a run
-// against the wrong fixture is obvious rather than silently degenerate.
-//
-// Both namespaces must exist on the network; start-x-batched creates them.
+// Requires `make start-x`, which creates both namespaces and runs the mock
+// orderer with SC_ORDERER_BLOCK_SIZE=2. At a block size of 1 no block could
+// carry both namespaces; the matrix fails loudly in that case rather than
+// silently degenerating into the single-namespace case twice.
 func TestNamespaceIsolationFabricX(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping FabricX namespace matrix in short mode")

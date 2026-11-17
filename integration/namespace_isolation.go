@@ -520,11 +520,10 @@ func commitMixedBlock(t *testing.T, backend string, parties []nsParty, recipient
 	}
 
 	t.Fatalf("backend=%s never produced a block carrying both namespaces in %d attempts.\n"+
-		"Most likely the orderer cuts one transaction per block — on the fabric-x test "+
-		"committer that is SC_ORDERER_BLOCK_SIZE in compose.fabric-x.yml, so run against "+
-		"the batched fixture (make start-x-batched) rather than plain start-x. Note that "+
-		"the value in testdata/config/mock-orderer.yaml would be ignored: the environment "+
-		"variable outranks it.", backend, mixedBlockAttempts)
+		"Most likely the orderer is cutting one transaction per block — on the fabric-x "+
+		"test committer that is SC_ORDERER_BLOCK_SIZE in compose.fabric-x.yml, which "+
+		"start-x expects to be 2. Note that the value in testdata/config/mock-orderer.yaml "+
+		"would be ignored: the environment variable outranks it.", backend, mixedBlockAttempts)
 	return 0, nil // unreachable: Fatalf stops the test
 }
 

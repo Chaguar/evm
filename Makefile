@@ -172,37 +172,16 @@ start-x:  ## Start the fabric-x test network (docker)
 	@while ! nc -z localhost 7001 2>/dev/null; do sleep 1; done
 	$(call create-namespace,$(NS),$(POLICY))
 	$(call create-namespace,$(NS_2OF2),$(POLICY_2OF2))
+	$(call create-namespace,$(NS_B),$(POLICY))
 
 .PHONY: test-x
 test-x: ## Integration cases against a running fabric-x network
 	@go test -timeout 60s -v -run ^TestFabricX$$ ./integration
 
-# start-x with a second application namespace and a mock orderer that batches
-# several transactions per block, for the namespace-isolation matrix
-# (integration/namespace_isolation_test.go).
-#
-# Both differences from start-x matter: without the second namespace there is
-# nothing to isolate from, and without batching every block holds one
-# transaction, so a block carrying both namespaces — and the transactionIndex
-# holes that come with it — cannot occur.
-#
-# Uses the same container name and ports as start-x, so run only one at a time.
-# `make stop-x` tears this down too: the overlay adds no new service, it only
-# changes environment variables on test-committer, which the base compose file
-# declares.
-.PHONY: start-x-batched
-start-x-batched:
-	@if nc -z localhost 7050 2>/dev/null; then echo "Error: port 7050 is already in use — stop any running Fabric orderer before starting."; exit 1; fi
-	@$(COMPOSE) -f compose.fabric-x.yml -f compose.fabric-x.batched.yml up -d
-	@echo "Waiting for test committer to be ready..."
-	@while ! nc -z localhost 7001 2>/dev/null; do sleep 1; done
-	$(call create-namespace,$(NS),$(POLICY))
-	$(call create-namespace,$(NS_B),$(POLICY))
-
-# The namespace-isolation matrix against the fabric-x test committer.
-# Requires `make start-x-batched` (not plain start-x — see above). Verbose
-# because the output is the deliverable: the test records what the gateways
-# report rather than asserting it.
+# The namespace-isolation matrix against the fabric-x test committer. Runs
+# against the same `make start-x` network as test-x: it creates NS_B as well,
+# and the orderer's block size of 2 (compose.fabric-x.yml) is what lets the two
+# namespaces share a block.
 .PHONY: test-ns-x
 test-ns-x:
 	@go test -timeout 120s -v -count=1 -run ^TestNamespaceIsolationFabricX$$ ./integration

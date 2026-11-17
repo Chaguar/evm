@@ -212,8 +212,9 @@ jobs:
   integration-tests:
     name: Integration Tests
     runs-on: ubuntu-latest
-    # avg ~6 min (fabric-x 39s + fabric-x namespace ~60s + fablo 127s, which now
-    # also deploys a second chaincode and runs the namespace matrix).
+    # avg ~5 min (fabric-x 39s plus the namespace matrix on the same network, and
+    # fablo 127s, which now also deploys a second chaincode and runs the matrix
+    # for classic fabric).
     timeout-minutes: 25
     needs: [ quick-tests, oz-hardhat-compat ]
     steps:
@@ -228,20 +229,11 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # Both suites run against the one network: start-x creates the matrix's
+      # second namespace, and the orderer's block size of 2 lets two namespaces
+      # share a block, so the matrix needs no fixture of its own.
       - name: Fabric-X integration tests
-        run: make clean-x init-x start-x test-x stop-x
-
-      # Needs its own network: the namespace matrix requires a block carrying
-      # transactions from two namespaces, and start-x's mock orderer is
-      # configured for one transaction per block, so start-x-batched raises the
-      # orderer's block size and creates the second namespace.
-      #
-      # clean-x and init-x are repeated rather than reusing the crypto from the
-      # step above. Regenerating is cheap, and starting from fresh crypto and a
-      # fresh genesis block is what keeps a failure here attributable to this
-      # step instead of to state left behind by the previous one.
-      - name: Fabric-X namespace isolation tests
-        run: make clean-x init-x start-x-batched test-ns-x stop-x
+        run: make clean-x init-x start-x test-x test-ns-x stop-x
 
       # Vanilla Fabric (integration/fablo.yaml is protocol: fabric). Covers both
       # TestFablo and TestNamespaceIsolationFablo — the namespace-isolation
