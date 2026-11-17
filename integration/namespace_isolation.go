@@ -315,7 +315,7 @@ func assertEmptyBlockPublished(t *testing.T, idle, active nsParty, blockNum uint
 	}
 	switch logs, err := blockLogs(t.Context(), idle, blockNum); {
 	case err != nil:
-		t.Errorf("ns=%s: FilterLogs for block %d: %v", idle.Namespace, blockNum, err)
+		t.Fatalf("ns=%s: FilterLogs for block %d: %v", idle.Namespace, blockNum, err)
 	case len(logs) != 0:
 		t.Errorf("ns=%s: block %d reports %d log(s), want none: only ns=%s committed in it",
 			idle.Namespace, blockNum, len(logs), active.Namespace)
@@ -391,10 +391,14 @@ func assertNoLeakage(t *testing.T, self, other nsParty, otherTxs []ethcommon.Has
 
 	// Logs are filtered by the other party's contract address, so a hit here
 	// is that contract's event surfacing on the wrong gateway.
+	//
+	// An error is fatal rather than logged: every harness registers a FilterAPI
+	// for its gateway (defaultHandlerChain), so a failure here is a broken
+	// filter path, not a backend that does not serve logs — and carrying on
+	// would leave log leakage unchecked while the test still passed.
 	logs, err := addressLogs(ctx, self, other.Contract)
 	if err != nil {
-		t.Logf("  ns=%s: FilterLogs for foreign address: %v", self.Namespace, err)
-		return
+		t.Fatalf("ns=%s: FilterLogs for foreign address %s: %v", self.Namespace, other.Contract, err)
 	}
 	if len(logs) > 0 {
 		t.Errorf("LEAK: gateway for ns=%s returned %d log(s) from contract %s deployed on ns=%s",
