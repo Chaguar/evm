@@ -288,7 +288,7 @@ None of the downstream handlers re-check the namespace. `collectWrites` in the e
 
 This is also why Ethereum block numbers are Fabric block numbers rather than a private, namespace-local sequence. The correspondence is relied on directly: a historical state query (`eth_getBalance` and friends at a block number) passes that number through to the endorser as a ledger height for the state snapshot. Renumbering would require a persistent mapping between the two.
 
-**Consequences visible at the RPC surface**: block numbers advance because of other applications' activity, and `eth_getBlockByNumber` can return an empty block for one of theirs. More sharply, a transaction's `transactionIndex` is its position within the *Fabric* block — counting other namespaces' transactions, non-EVM transactions, and transactions dropped as MVCC conflicts — so it is not a dense index into the block's `transactions` array. `cumulativeGasUsed` and `logIndex`, by contrast, are counted only over the namespace's own transactions. See `docs/COMPATIBILITY.md` (Block and Receipt representation) for what this means for clients and indexers.
+**Consequences visible at the RPC surface**: block numbers advance because of other applications' activity, and `eth_getBlockByNumber` can return an empty block for one of theirs. A transaction's `transactionIndex` is also its position within the *Fabric* block rather than a dense index into the block's `transactions` array — `#440` changes that. See `docs/COMPATIBILITY.md` (Block and Receipt representation) for what this means for clients and indexers.
 
 ## Performance, Throughput, and Concurrency Management
 

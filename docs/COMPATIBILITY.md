@@ -420,28 +420,12 @@ no other application's data is ever returned — but the block sequence is not p
 reflects total channel activity. Clients that assume a non-empty block, or that infer transaction
 volume from block height, will be misled.
 
-**`transactionIndex` is the position in the Fabric block, so it can be sparse**: the index is the
-transaction's position among *all* transactions in the Fabric block, including those belonging to
-other namespaces, non-EVM transactions, and transactions dropped as MVCC conflicts. It is
-therefore **not** a dense `0..n-1` index into the block's `transactions` array, and does not
-generally equal the array position. Concretely, for a block whose positions 1 and 3 hold this
-namespace's transactions and position 2 holds another's:
-
-```
-eth_getBlockByNumber(n)                        -> transactions: [txA, txB]   (2 entries)
-txA.transactionIndex                           -> 0x1
-txB.transactionIndex                           -> 0x3
-eth_getTransactionByBlockNumberAndIndex(n, 0)  -> null
-                                       (n, 1)  -> txA
-                                       (n, 2)  -> null
-                                       (n, 3)  -> txB
-```
-
-This breaks indexers that iterate indices `0..transactionCount-1`, or that use `transactionIndex`
-to index into the `transactions` array. Note that `cumulativeGasUsed` and `logIndex` are
-namespace-local and dense, so they are inconsistent with `transactionIndex`. Enumerate a block's
-transactions from the `transactions` array rather than by index, and treat `transactionIndex` as
-an opaque identifier.
+**`transactionIndex` may be sparse**: the index is the transaction's position in the *Fabric*
+block, which also counts other namespaces' transactions, non-EVM transactions and transactions
+dropped as MVCC conflicts, so it is not a dense `0..n-1` index into the block's `transactions`
+array and `eth_getTransactionByBlockNumberAndIndex` can return `null` for an index below the
+highest one. Enumerate a block from the `transactions` array rather than by index. `#440`
+densifies the index over the transactions the gateway keeps; **remove this note when it lands.**
 
 **Block production requires transactions**: Fabric only creates new blocks when there are
 transactions to order. If no transactions are submitted, the block number does not advance.
