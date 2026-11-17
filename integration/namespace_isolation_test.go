@@ -37,10 +37,10 @@ import (
 //	                                mixed blocks are unreachable there).
 //	TestNamespaceIsolationFablo   — a running Fablo network with two chaincodes.
 //
-// These tests record behaviour and assert only that neither gateway can see the
-// other namespace's data. Transaction indices, index holes and block numbering
-// are printed, not checked — deciding what those should be is the point of
-// gathering the output. Run with -v to see it.
+// What each backend has to satisfy is listed at the top of
+// namespace_isolation.go: no gateway sees the other namespace's data or loses
+// its own, both agree on block identity and height, and a block carrying
+// nothing for a namespace still reaches it, empty.
 
 // nsMatrixSupply is the token supply each party's contract is deployed with.
 // Large enough that the matrix's transfers never exhaust it.

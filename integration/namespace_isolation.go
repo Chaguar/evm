@@ -8,11 +8,9 @@ package integration
 
 import (
 	"context"
-	"fmt"
 	"math/big"
-	"slices"
-	"strings"
 	"testing"
+	"time"
 
 	"github.com/ethereum/go-ethereum"
 	ethcommon "github.com/ethereum/go-ethereum/common"
@@ -28,19 +26,25 @@ import (
 
 // This file holds the backend-independent half of the namespace-isolation
 // matrix; the per-backend entry points are in namespace_isolation_test.go.
-// Two gateways, one per namespace, commit to the same channel; we then read
-// the Ethereum RPC surface from both and record what each one sees.
+// Two gateways, one namespace each, commit to the same channel, and both are
+// then read over the Ethereum RPC surface. Every backend has to satisfy:
 //
-// The point is to find out what the gateway currently does, not to assert that
-// it is right. Only one thing is asserted — no gateway ever returns the other
-// namespace's data (assertNoLeakage). Everything else is recorded into
-// blockReport and printed, so the backends can be compared side by side and we
-// can then decide what, if anything, to change.
+//   - No gateway returns the other namespace's transactions, receipts or logs,
+//     and none loses its own.
+//   - A block carrying a transaction from each namespace is reported by both
+//     gateways as the same block, each listing only its own transaction.
+//   - A block carrying nothing for a namespace is still published to that
+//     namespace's gateway, empty.
+//   - Block numbers are the channel's, not the namespace's: both gateways
+//     report the same height, and it follows activity either of them caused.
+//   - Every transaction is retrievable at the transactionIndex it reports for
+//     itself, and no index ever yields the other namespace's transaction.
 //
-// Deliberately not asserted, because these are the open questions:
-//   - transactionIndex values and the holes between them
-//   - whether eth_blockNumber tracks ledger height or namespace-local height
-//   - whether a block carrying nothing for this namespace is published at all
+// transactionIndex is checked for that round trip only, not for a particular
+// value. Today it is the position in the Fabric block and so can be sparse
+// (see docs/COMPATIBILITY.md); #440 densifies it over the EVM transactions the
+// gateway keeps. Both satisfy the round trip, so this suite does not have to
+// change along with it.
 
 // nsParty is one namespace and the gateway that commits to it.
 type nsParty struct {
@@ -60,12 +64,9 @@ type nsParty struct {
 }
 
 // rpcBlockJSON and rpcTxJSON are the few fields of the JSON-RPC block and
-// transaction shapes this matrix reads. They are deliberately minimal and
-// decoded straight from the wire rather than via ethclient, for the reason
-// given in observeBlock: ethclient's types.Block recomputes its own hash and
-// would not round-trip a Fabric-derived one. A pointer field distinguishes
-// "absent" from "zero", which matters when the question is whether a block or
-// transaction exists at all.
+// transaction shapes this matrix reads, decoded straight from the wire for the
+// reason given in getBlock. A pointer field distinguishes "absent" from "zero",
+// which matters when the question is whether a block or transaction exists.
 type rpcBlockJSON struct {
 	Number       *hexutil.Uint64 `json:"number"`
 	Hash         *ethcommon.Hash `json:"hash"`
@@ -75,193 +76,250 @@ type rpcBlockJSON struct {
 
 type rpcTxJSON struct {
 	Hash             ethcommon.Hash  `json:"hash"`
-	BlockNumber      *hexutil.Big    `json:"blockNumber"`
 	TransactionIndex *hexutil.Uint64 `json:"transactionIndex"`
 }
 
-// txRecord is one Ethereum transaction as a gateway reports it.
-type txRecord struct {
-	Hash ethcommon.Hash
-	// Index is transactionIndex as reported by the gateway. Recorded rather
-	// than asserted: whether this should be the ledger-wide position or a
-	// gap-free namespace-local one is exactly what we are trying to decide.
-	Index uint64
-	// ArrayPos is this transaction's position in the block's transactions
-	// array. Where it differs from Index, the two disagree.
-	ArrayPos        int
-	CumulativeGas   uint64
-	GasUsed         uint64
-	Status          uint64
-	LogIndices      []uint
-	FoundByBlockPos bool
-}
-
-// blockReport is everything one gateway saw for one block.
-type blockReport struct {
-	Namespace   string
-	BlockNumber uint64
-	BlockHash   ethcommon.Hash
-	ParentHash  ethcommon.Hash
-	// TxCount is eth_getBlockTransactionCountByNumber, which can disagree with
-	// len(Txs) if counting and listing take different paths.
-	TxCount uint
-	Txs     []txRecord
-	// ByIndexProbe records, for every index from 0 to the highest
-	// transactionIndex seen, whether
-	// eth_getTransactionByBlockNumberAndIndex returned a transaction. A false
-	// at a position below the maximum is a hole.
-	ByIndexProbe map[uint64]bool
-	// LogCount is how many logs eth_getLogs returned for this block.
-	LogCount int
-	// Empty is true when the gateway published the block with no transactions
-	// of ours in it.
-	Empty bool
-}
-
-// String renders one block as a fixed set of labelled lines, one field per
-// line and in a stable order, so the output of two backends can be diffed
-// directly to see where they disagree.
-func (r blockReport) String() string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "  ns=%-10s block=%-4d txs=%d count=%d logs=%d empty=%v\n",
-		r.Namespace, r.BlockNumber, len(r.Txs), r.TxCount, r.LogCount, r.Empty)
-
-	if len(r.Txs) > 0 {
-		idx := make([]string, len(r.Txs))
-		pos := make([]string, len(r.Txs))
-		cum := make([]string, len(r.Txs))
-		for i, tx := range r.Txs {
-			idx[i] = fmt.Sprintf("%#x", tx.Index)
-			pos[i] = fmt.Sprintf("%d", tx.ArrayPos)
-			cum[i] = fmt.Sprintf("%d", tx.CumulativeGas)
-		}
-		fmt.Fprintf(&b, "    transactionIndex : [%s]\n", strings.Join(idx, ", "))
-		fmt.Fprintf(&b, "    arrayPosition    : [%s]\n", strings.Join(pos, ", "))
-		fmt.Fprintf(&b, "    cumulativeGasUsed: [%s]\n", strings.Join(cum, ", "))
-
-		if len(r.ByIndexProbe) > 0 {
-			keys := make([]uint64, 0, len(r.ByIndexProbe))
-			for k := range r.ByIndexProbe {
-				keys = append(keys, k)
-			}
-			slices.Sort(keys)
-			probe := make([]string, 0, len(keys))
-			holes := 0
-			for _, k := range keys {
-				mark := "tx"
-				if !r.ByIndexProbe[k] {
-					mark = "null"
-					holes++
-				}
-				probe = append(probe, fmt.Sprintf("%d:%s", k, mark))
-			}
-			fmt.Fprintf(&b, "    byBlockAndIndex  : %s", strings.Join(probe, "  "))
-			if holes > 0 {
-				fmt.Fprintf(&b, "   <- %d hole(s)", holes)
-			}
-			b.WriteString("\n")
-		}
-	}
-	return b.String()
-}
-
-// observeBlock reads every block-scoped RPC a gateway serves for blockNum and
-// records the answers. It never fails the test on the values it finds; a
-// transport error is still fatal, since that means we learned nothing.
-func observeBlock(t *testing.T, p nsParty, blockNum uint64) blockReport {
+// getBlock reads one block as a gateway's RPC reports it, nil when the gateway
+// has no such block.
+//
+// Raw JSON rather than ethclient.BlockByNumber: ethclient rebuilds a
+// types.Block, whose Hash() recomputes a keccak over the header — but our block
+// hashes come from Fabric and are stored as-is, so the recomputed value is not
+// a hash the gateway has ever heard of, and every hash-keyed call made with it
+// would miss. A transport error is fatal; it means we learned nothing, which is
+// different from learning that the block is absent.
+func getBlock(t *testing.T, p nsParty, blockNum uint64) *rpcBlockJSON {
 	t.Helper()
-	ctx := t.Context()
 
-	rep := blockReport{Namespace: p.Namespace, BlockNumber: blockNum, ByIndexProbe: map[uint64]bool{}}
-
-	// Read the block as raw JSON rather than through ethclient.BlockByNumber.
-	// ethclient rebuilds a types.Block, whose Hash() recomputes a keccak over
-	// the header — but our block hashes come from Fabric and are stored as-is,
-	// so the recomputed value is not a hash the gateway has ever heard of.
-	// Probing by it would make every hash-keyed call miss and misreport the
-	// result as the gateway's fault.
-	var raw rpcBlockJSON
-	if err := p.Eth.Client().CallContext(ctx, &raw, "eth_getBlockByNumber",
+	var raw *rpcBlockJSON
+	if err := p.Eth.Client().CallContext(t.Context(), &raw, "eth_getBlockByNumber",
 		hexutil.EncodeUint64(blockNum), true); err != nil {
-		t.Logf("  ns=%s block=%d: eth_getBlockByNumber: %v", p.Namespace, blockNum, err)
-		rep.Empty = true
-		return rep
+		t.Fatalf("ns=%s: eth_getBlockByNumber(%d): %v", p.Namespace, blockNum, err)
 	}
-	if raw.Hash == nil {
-		// A null result: the gateway has no such block at all. Whether a block
-		// carrying nothing for this namespace is published is one of the open
-		// questions, so this is recorded, not failed.
-		t.Logf("  ns=%s block=%d: not found (null)", p.Namespace, blockNum)
-		rep.Empty = true
-		return rep
+	if raw == nil || raw.Hash == nil {
+		return nil
 	}
+	return raw
+}
 
-	rep.BlockHash = *raw.Hash
-	if raw.ParentHash != nil {
-		rep.ParentHash = *raw.ParentHash
-	}
-	rep.Empty = len(raw.Transactions) == 0
+// txByBlockAndIndex is eth_getTransactionByBlockNumberAndIndex, nil when the
+// gateway reports nothing at that index. By number rather than hash, so the
+// recomputed-hash problem in getBlock cannot be mistaken for an empty slot.
+func txByBlockAndIndex(t *testing.T, p nsParty, blockNum, index uint64) *rpcTxJSON {
+	t.Helper()
 
-	var count hexutil.Uint
-	if err := p.Eth.Client().CallContext(ctx, &count, "eth_getBlockTransactionCountByHash",
-		rep.BlockHash); err != nil {
-		t.Logf("  ns=%s block=%d: eth_getBlockTransactionCountByHash: %v", p.Namespace, blockNum, err)
-	} else {
-		rep.TxCount = uint(count)
+	var got *rpcTxJSON
+	if err := p.Eth.Client().CallContext(t.Context(), &got, "eth_getTransactionByBlockNumberAndIndex",
+		hexutil.EncodeUint64(blockNum), hexutil.EncodeUint64(index)); err != nil {
+		t.Fatalf("ns=%s: eth_getTransactionByBlockNumberAndIndex(%d, %d): %v",
+			p.Namespace, blockNum, index, err)
 	}
+	return got
+}
 
-	maxIndex := uint64(0)
-	for pos, rtx := range raw.Transactions {
-		rec := txRecord{Hash: rtx.Hash, ArrayPos: pos}
-		if rtx.TransactionIndex != nil {
-			rec.Index = uint64(*rtx.TransactionIndex)
+// heightTimeout bounds how long the gateways are given to agree on a height.
+// The party that committed has primer.WaitForCommit as its synchronization
+// point; the idle party has none, so the only way to say anything about its
+// view of a block it has nothing in is to wait for it.
+const heightTimeout = 10 * time.Second
+
+// assertSameHeight waits for every party to report the same eth_blockNumber, at
+// least atLeast.
+//
+// Agreement is the claim: block numbers are the channel's, not the namespace's,
+// so a gateway with nothing of its own in the last few blocks still counts
+// them. A namespace-local sequence would show up as the idle gateway
+// permanently behind.
+func assertSameHeight(t *testing.T, parties []nsParty, atLeast uint64) {
+	t.Helper()
+
+	deadline := time.Now().Add(heightTimeout)
+	for {
+		heights := make([]uint64, len(parties))
+		for i, p := range parties {
+			h, err := p.Eth.BlockNumber(t.Context())
+			if err != nil {
+				t.Fatalf("ns=%s: eth_blockNumber: %v", p.Namespace, err)
+			}
+			heights[i] = h
 		}
 
-		receipt, err := p.Eth.TransactionReceipt(ctx, rtx.Hash)
-		if err != nil {
-			t.Logf("  ns=%s block=%d tx=%s: TransactionReceipt: %v", p.Namespace, blockNum, rtx.Hash, err)
-		} else {
-			// The receipt's index is authoritative for what an indexer sees;
-			// it should agree with the one in the block listing.
-			rec.Index = uint64(receipt.TransactionIndex)
-			rec.CumulativeGas = receipt.CumulativeGasUsed
-			rec.GasUsed = receipt.GasUsed
-			rec.Status = receipt.Status
-			for _, l := range receipt.Logs {
-				rec.LogIndices = append(rec.LogIndices, l.Index)
+		agreed := heights[0] >= atLeast
+		for _, h := range heights[1:] {
+			if h != heights[0] {
+				agreed = false
 			}
 		}
-		if rec.Index > maxIndex {
-			maxIndex = rec.Index
+		if agreed {
+			return
 		}
-		rep.Txs = append(rep.Txs, rec)
+
+		if time.Now().After(deadline) {
+			t.Fatalf("gateways never agreed on a height >= %d within %s; last reading %v. "+
+				"A gateway stuck below the others means blocks that are empty after "+
+				"namespace filtering never reach it.", atLeast, heightTimeout, heights)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// assertSameBlock checks that two gateways describe the same Fabric block under
+// one number. Without this, everything asserted about the contents of "block n"
+// would only say that each gateway has some block with that number.
+func assertSameBlock(t *testing.T, blockNum uint64, a nsParty, ablk *rpcBlockJSON, b nsParty, bblk *rpcBlockJSON) {
+	t.Helper()
+
+	if *ablk.Hash != *bblk.Hash {
+		t.Errorf("block %d: ns=%s reports hash %s, ns=%s reports %s",
+			blockNum, a.Namespace, ablk.Hash, b.Namespace, bblk.Hash)
+	}
+	if parentOf(ablk) != parentOf(bblk) {
+		t.Errorf("block %d: ns=%s reports parentHash %s, ns=%s reports %s",
+			blockNum, a.Namespace, parentOf(ablk), b.Namespace, parentOf(bblk))
+	}
+}
+
+// parentOf is a block's parentHash, zero when absent.
+func parentOf(blk *rpcBlockJSON) ethcommon.Hash {
+	if blk.ParentHash == nil {
+		return ethcommon.Hash{}
+	}
+	return *blk.ParentHash
+}
+
+// assertIndexRoundTrip checks the by-index path into a block: every transaction
+// the gateway lists comes back at the transactionIndex it reports for itself,
+// and no index up to probeUpTo yields a transaction the gateway does not list.
+//
+// The probe matters more than the round trip. In a shared block some indices
+// below probeUpTo are occupied by the other namespace's transactions in the
+// Fabric block, so this is the leakage question asked through the index path
+// rather than by hash.
+func assertIndexRoundTrip(t *testing.T, p nsParty, blockNum uint64, blk *rpcBlockJSON, probeUpTo uint64) {
+	t.Helper()
+
+	listed := make(map[ethcommon.Hash]bool, len(blk.Transactions))
+	for _, tx := range blk.Transactions {
+		listed[tx.Hash] = true
 	}
 
-	// Probe every index up to the highest one reported, so holes show up as
-	// explicit nulls rather than as absence. Raw RPC again, and by block
-	// number, so neither the recomputed-hash problem nor ethclient's
-	// null-handling can be mistaken for a hole.
-	for i := uint64(0); i <= maxIndex && len(rep.Txs) > 0; i++ {
-		var got *rpcTxJSON
-		err := p.Eth.Client().CallContext(ctx, &got, "eth_getTransactionByBlockNumberAndIndex",
-			hexutil.EncodeUint64(blockNum), hexutil.EncodeUint64(i))
-		rep.ByIndexProbe[i] = err == nil && got != nil
+	for _, tx := range blk.Transactions {
+		if tx.TransactionIndex == nil {
+			t.Errorf("ns=%s: block %d lists tx %s with no transactionIndex", p.Namespace, blockNum, tx.Hash)
+			continue
+		}
+		idx := uint64(*tx.TransactionIndex)
+		if idx > probeUpTo {
+			probeUpTo = idx
+		}
+
+		switch got := txByBlockAndIndex(t, p, blockNum, idx); {
+		case got == nil:
+			t.Errorf("ns=%s: block %d lists tx %s at transactionIndex %#x, but nothing is returned there",
+				p.Namespace, blockNum, tx.Hash, idx)
+		case got.Hash != tx.Hash:
+			t.Errorf("ns=%s: block %d index %#x returns tx %s, want %s",
+				p.Namespace, blockNum, idx, got.Hash, tx.Hash)
+		}
 	}
 
-	// Mark which transactions were reachable by block position at their own
-	// reported index — the round trip an indexer makes.
-	for i := range rep.Txs {
-		rep.Txs[i].FoundByBlockPos = rep.ByIndexProbe[rep.Txs[i].Index]
+	for i := uint64(0); i <= probeUpTo; i++ {
+		if got := txByBlockAndIndex(t, p, blockNum, i); got != nil && !listed[got.Hash] {
+			t.Errorf("LEAK: gateway for ns=%s returns tx %s at block %d index %d, which it does not list in that block",
+				p.Namespace, got.Hash, blockNum, i)
+		}
+	}
+}
+
+// assertSharedBlock checks both gateways' view of a block that carried one
+// transaction from each namespace; txs is indexed by party, as commitConcurrently
+// returns it.
+//
+// This is the sharpest form of the isolation question: one block number, one
+// range of ledger positions, two namespaces. Both gateways must agree on which
+// Fabric block it is and disagree on its contents in exactly the way the
+// namespace filter prescribes.
+func assertSharedBlock(t *testing.T, parties []nsParty, blockNum uint64, txs []*types.Transaction) {
+	t.Helper()
+
+	blocks := make([]*rpcBlockJSON, len(parties))
+	probeUpTo := uint64(0)
+	for i, p := range parties {
+		blk := getBlock(t, p, blockNum)
+		if blk == nil {
+			t.Fatalf("ns=%s: block %d is missing, but this namespace committed in it", p.Namespace, blockNum)
+		}
+		blocks[i] = blk
+		for _, tx := range blk.Transactions {
+			if tx.TransactionIndex != nil && uint64(*tx.TransactionIndex) > probeUpTo {
+				probeUpTo = uint64(*tx.TransactionIndex)
+			}
+		}
+	}
+	for i := 1; i < len(blocks); i++ {
+		assertSameBlock(t, blockNum, parties[0], blocks[0], parties[i], blocks[i])
 	}
 
-	logs, err := blockLogs(ctx, p, blockNum)
-	if err != nil {
-		t.Logf("  ns=%s block=%d: FilterLogs: %v", p.Namespace, blockNum, err)
-	} else {
-		rep.LogCount = len(logs)
+	for i, p := range parties {
+		listed := make(map[ethcommon.Hash]bool, len(blocks[i].Transactions))
+		for _, tx := range blocks[i].Transactions {
+			listed[tx.Hash] = true
+		}
+
+		if !listed[txs[i].Hash()] {
+			t.Errorf("ns=%s: block %d does not list this namespace's own tx %s",
+				p.Namespace, blockNum, txs[i].Hash())
+		}
+		for j := range parties {
+			if j != i && listed[txs[j].Hash()] {
+				t.Errorf("LEAK: gateway for ns=%s lists tx %s (ns=%s) in its view of block %d",
+					p.Namespace, txs[j].Hash(), parties[j].Namespace, blockNum)
+			}
+		}
+		// probeUpTo spans both parties' positions, so each gateway is probed
+		// across the other's too.
+		assertIndexRoundTrip(t, p, blockNum, blocks[i], probeUpTo)
+	}
+}
+
+// assertEmptyBlockPublished checks that a block one namespace committed in is
+// still published to the other, carrying nothing.
+//
+// This is the "blocks are forwarded even when empty" invariant from
+// docs/ARCHITECTURE.md seen from the RPC surface. The stores take their resume
+// height from the blocks they are handed, so a block whose transactions all
+// belong to another namespace has to arrive empty rather than not arrive: a gap
+// in the sequence would be indistinguishable downstream from a block that went
+// missing.
+func assertEmptyBlockPublished(t *testing.T, idle, active nsParty, blockNum uint64) {
+	t.Helper()
+
+	committed := getBlock(t, active, blockNum)
+	if committed == nil {
+		t.Fatalf("ns=%s: block %d is missing on the gateway that committed in it", active.Namespace, blockNum)
 	}
 
-	return rep
+	blk := getBlock(t, idle, blockNum)
+	if blk == nil {
+		t.Errorf("ns=%s: block %d is missing, but ns=%s committed in it: a block carrying "+
+			"nothing for a namespace must still be published to it, empty",
+			idle.Namespace, blockNum, active.Namespace)
+		return
+	}
+
+	assertSameBlock(t, blockNum, active, committed, idle, blk)
+
+	if n := len(blk.Transactions); n != 0 {
+		t.Errorf("ns=%s: block %d lists %d transaction(s), want none: only ns=%s committed in it",
+			idle.Namespace, blockNum, n, active.Namespace)
+	}
+	switch logs, err := blockLogs(t.Context(), idle, blockNum); {
+	case err != nil:
+		t.Errorf("ns=%s: FilterLogs for block %d: %v", idle.Namespace, blockNum, err)
+	case len(logs) != 0:
+		t.Errorf("ns=%s: block %d reports %d log(s), want none: only ns=%s committed in it",
+			idle.Namespace, blockNum, len(logs), active.Namespace)
+	}
 }
 
 // newParty deploys this namespace's contract and returns the party that owns
@@ -310,9 +368,9 @@ func addressLogs(ctx context.Context, p nsParty, addr ethcommon.Address) ([]type
 	})
 }
 
-// assertNoLeakage is the one hard requirement in this matrix: a gateway must
-// never surface another namespace's transactions, receipts or logs. Everything
-// else here is recorded; this is checked.
+// assertNoLeakage checks that a gateway surfaces none of another namespace's
+// transactions, receipts or logs, asked by hash and by contract address rather
+// than per block.
 //
 // Each party deploys its own contract from its own key, so any appearance of
 // the other party's tx hash or contract address is unambiguous leakage.
@@ -344,10 +402,26 @@ func assertNoLeakage(t *testing.T, self, other nsParty, otherTxs []ethcommon.Has
 	}
 }
 
+// assertOwnTxsVisible checks that each party still sees everything it
+// committed. Without it, "no leakage" would be trivially satisfiable by a
+// gateway that returns nothing at all.
+func assertOwnTxsVisible(t *testing.T, parties []nsParty, ownTxs [][]ethcommon.Hash) {
+	t.Helper()
+	ctx := t.Context()
+
+	for i, p := range parties {
+		for _, h := range ownTxs[i] {
+			if tx, _, err := p.Eth.TransactionByHash(ctx, h); err != nil || tx == nil {
+				t.Errorf("ns=%s lost its own tx %s: %v", p.Namespace, h, err)
+			}
+		}
+	}
+}
+
 // commitConcurrently submits one transaction per party and only then waits for
 // both, so the orderer can batch them into a single block. The existing
 // callSmartContract helper submits and waits before returning, which serializes
-// and guarantees one transaction per block — the opposite of what the mixed-block
+// and guarantees one transaction per block — the opposite of what the shared-block
 // case needs.
 //
 // Returns the submitted transactions in the order the parties were given.
@@ -391,11 +465,11 @@ func blockOf(t *testing.T, p nsParty, tx *types.Transaction) uint64 {
 	return r.BlockNumber.Uint64()
 }
 
-// describeComposition says whether the parties' transactions shared a block.
-// The mixed-block case depends on them doing so, and an orderer that cut a
-// block per transaction would otherwise leave the test silently measuring the
-// single-namespace case twice.
-func describeComposition(t *testing.T, parties []nsParty, txs []*types.Transaction) (shared bool, blocks []uint64) {
+// sharedBlockOf says whether the parties' transactions landed in one block, and
+// which blocks they landed in. An orderer that cut a block per transaction
+// would otherwise leave the test silently checking the single-namespace case
+// twice.
+func sharedBlockOf(t *testing.T, parties []nsParty, txs []*types.Transaction) (shared bool, blocks []uint64) {
 	t.Helper()
 	blocks = make([]uint64, len(parties))
 	for i := range parties {
@@ -409,51 +483,10 @@ func describeComposition(t *testing.T, parties []nsParty, txs []*types.Transacti
 	return shared, blocks
 }
 
-// reportBlocks prints one report per party per block, in a stable order.
-// It returns every report it gathered, indexed by party and then by block
-// number, so a caller can assert on the same observation it just printed
-// instead of reading the chain a second time. Observing twice would double the
-// RPC traffic and, more confusingly, log "not found" twice for one block.
-func reportBlocks(t *testing.T, label string, parties []nsParty, blockNums []uint64) []map[uint64]blockReport {
-	t.Helper()
-
-	seen := map[uint64]bool{}
-	ordered := make([]uint64, 0, len(blockNums))
-	for _, n := range blockNums {
-		if !seen[n] {
-			seen[n] = true
-			ordered = append(ordered, n)
-		}
-	}
-	slices.Sort(ordered)
-
-	reports := make([]map[uint64]blockReport, len(parties))
-	for i := range parties {
-		reports[i] = map[uint64]blockReport{}
-	}
-
-	var b strings.Builder
-	fmt.Fprintf(&b, "\n=== %s ===\n", label)
-	for _, n := range ordered {
-		for i, p := range parties {
-			rep := observeBlock(t, p, n)
-			reports[i][n] = rep
-			b.WriteString(rep.String())
-		}
-	}
-	for _, p := range parties {
-		if h, err := p.Eth.BlockNumber(t.Context()); err == nil {
-			fmt.Fprintf(&b, "  ns=%-10s eth_blockNumber=%d\n", p.Namespace, h)
-		}
-	}
-	t.Log(b.String())
-	return reports
-}
-
 // mixedBlockAttempts is how many times the matrix tries to land both
 // namespaces' transactions in one block before giving up.
 //
-// Retried because batching is timing-dependent, not because a mixed block is
+// Retried because batching is timing-dependent, not because a shared block is
 // optional: an orderer cuts on whichever of its size and time thresholds trips
 // first, so a batch boundary can fall between two concurrent submissions
 // however promptly they are sent. A backend that batches at all shares a block
@@ -465,11 +498,9 @@ const mixedBlockAttempts = 5
 // the same block, and returns that block along with every transaction it
 // committed (grouped per attempt, the successful one last).
 //
-// Not achieving a mixed block is fatal. The transactionIndex holes a shared
-// block produces are the thing this matrix exists to observe, so a run that
-// never gets one has not tested what it set out to test and must not report
-// success. On the fabric-x test committer the cause is a block size of 1 — use
-// the batched fixture (make start-x-batched).
+// Not achieving a shared block is fatal: it is the case this matrix exists to
+// check, so a run that never gets one has not tested what it set out to test
+// and must not report success.
 func commitMixedBlock(t *testing.T, backend string, parties []nsParty, recipient ethcommon.Address) (uint64, [][]*types.Transaction) {
 	t.Helper()
 
@@ -478,19 +509,17 @@ func commitMixedBlock(t *testing.T, backend string, parties []nsParty, recipient
 		txs := commitConcurrently(t, parties, "transfer", recipient, big.NewInt(1))
 		committed = append(committed, txs)
 
-		shared, blocks := describeComposition(t, parties, txs)
+		shared, blocks := sharedBlockOf(t, parties, txs)
 		if shared {
-			t.Logf("mixed-block case: both namespaces landed in block %d (attempt %d/%d)",
+			t.Logf("shared-block case: both namespaces landed in block %d (attempt %d/%d)",
 				blocks[0], attempt, mixedBlockAttempts)
 			return blocks[0], committed
 		}
-		t.Logf("mixed-block attempt %d/%d: landed in separate blocks %v, retrying",
+		t.Logf("shared-block attempt %d/%d: landed in separate blocks %v, retrying",
 			attempt, mixedBlockAttempts, blocks)
 	}
 
 	t.Fatalf("backend=%s never produced a block carrying both namespaces in %d attempts.\n"+
-		"The matrix cannot observe transactionIndex holes without one, so this is a failure "+
-		"rather than a skip: nothing was learned about the case it exists to measure.\n"+
 		"Most likely the orderer cuts one transaction per block — on the fabric-x test "+
 		"committer that is SC_ORDERER_BLOCK_SIZE in compose.fabric-x.yml, so run against "+
 		"the batched fixture (make start-x-batched) rather than plain start-x. Note that "+
@@ -499,46 +528,18 @@ func commitMixedBlock(t *testing.T, backend string, parties []nsParty, recipient
 	return 0, nil // unreachable: Fatalf stops the test
 }
 
-// assertBlockExcludes checks that p's view of a block lists none of the given
-// foreign transactions.
-//
-// This is the leakage property stated per block rather than per hash: a gateway
-// may legitimately publish a block it has nothing in (the empty-after-filter
-// case, which is recorded rather than asserted), but it must never list another
-// namespace's transaction as part of one.
-// rep is the observation already taken for that block (see reportBlocks), so
-// the assertion is made against exactly what was printed.
-func assertBlockExcludes(t *testing.T, rep blockReport, foreign []ethcommon.Hash, foreignNs string) {
-	t.Helper()
-
-	unwanted := make(map[ethcommon.Hash]bool, len(foreign))
-	for _, h := range foreign {
-		unwanted[h] = true
-	}
-
-	for _, tx := range rep.Txs {
-		if unwanted[tx.Hash] {
-			t.Errorf("LEAK: gateway for ns=%s lists tx %s (ns=%s) in its view of block %d",
-				rep.Namespace, tx.Hash, foreignNs, rep.BlockNumber)
-		}
-	}
-}
-
 // runNamespaceIsolationMatrix is the shared body every backend runs. parties
 // must be two gateways on the same channel, each configured with its own
 // namespace and each already serving RPC.
 //
-// It records what both gateways see for a mixed block and for a
-// single-namespace block in each direction. Two things are asserted: neither
-// gateway can see the other's data, and a mixed block was actually achieved —
-// without one, the case the matrix exists to measure went unmeasured, which is
-// a failure rather than a skip.
+// It drives two situations — a block carrying both namespaces, and a block
+// carrying one of them while the other is idle, in each direction — and asserts
+// the properties listed at the top of this file against both.
 func runNamespaceIsolationMatrix(t *testing.T, backend string, parties []nsParty) {
 	t.Helper()
 	if len(parties) != 2 {
 		t.Fatalf("namespace matrix needs exactly 2 parties, got %d", len(parties))
 	}
-	ctx := t.Context()
 
 	t.Logf("backend=%s namespaces=[%s, %s]", backend, parties[0].Namespace, parties[1].Namespace)
 
@@ -546,24 +547,19 @@ func runNamespaceIsolationMatrix(t *testing.T, backend string, parties []nsParty
 	// transfer emits a Transfer event on that namespace only.
 	ownTxs := make([][]ethcommon.Hash, len(parties))
 
-	// ── Mixed block: both namespaces transact at once ──────────────────────
+	// ── A block carrying both namespaces ──────────────────────────────────
 	recipient := ethcommon.HexToAddress("0x000000000000000000000000000000000000c0de")
-	mixedBlock, mixedAttempts := commitMixedBlock(t, backend, parties, recipient)
-	for _, txs := range mixedAttempts {
+	sharedBlock, attempts := commitMixedBlock(t, backend, parties, recipient)
+	for _, txs := range attempts {
 		for i := range parties {
 			ownTxs[i] = append(ownTxs[i], txs[i].Hash())
 		}
 	}
-	mixedReports := reportBlocks(t, "mixed block ("+backend+")", parties, []uint64{mixedBlock})
 
-	// Neither party may list the other's transaction in the block they shared.
-	// This is the sharpest form of the isolation question: one block number,
-	// one range of ledger positions, two namespaces.
-	winning := mixedAttempts[len(mixedAttempts)-1]
-	assertBlockExcludes(t, mixedReports[0][mixedBlock], []ethcommon.Hash{winning[1].Hash()}, parties[1].Namespace)
-	assertBlockExcludes(t, mixedReports[1][mixedBlock], []ethcommon.Hash{winning[0].Hash()}, parties[0].Namespace)
+	assertSameHeight(t, parties, sharedBlock)
+	assertSharedBlock(t, parties, sharedBlock, attempts[len(attempts)-1])
 
-	// ── Single-namespace blocks, in both directions ────────────────────────
+	// ── Single-namespace blocks, in both directions ───────────────────────
 	// Each party in turn commits alone while the other stays idle, so the
 	// empty-after-filter case is exercised from both sides. One direction
 	// alone would miss a filter that works for one namespace but not the
@@ -578,26 +574,12 @@ func runNamespaceIsolationMatrix(t *testing.T, backend string, parties []nsParty
 		t.Logf("single-namespace case: ns=%s committed alone in block %d (ns=%s idle)",
 			actor.Namespace, soloBlock, idle.Namespace)
 
-		// The idle party sees that block number with nothing of its own in it.
-		// Whether it publishes the block at all is recorded by observeBlock
-		// rather than assumed; what is asserted is that it does not list the
-		// actor's transaction.
-		soloReports := reportBlocks(t, "single-namespace block, ns="+actor.Namespace+" active ("+backend+")",
-			parties, []uint64{soloBlock})
-		assertBlockExcludes(t, soloReports[1-i][soloBlock], []ethcommon.Hash{solo[0].Hash()}, actor.Namespace)
+		assertSameHeight(t, parties, soloBlock)
+		assertEmptyBlockPublished(t, idle, actor, soloBlock)
 	}
 
-	// ── The leakage assertion, across everything committed above ───────────
+	// ── Leakage, across everything committed above ────────────────────────
 	assertNoLeakage(t, parties[0], parties[1], ownTxs[1])
 	assertNoLeakage(t, parties[1], parties[0], ownTxs[0])
-
-	// Each party must still see its own transactions, or "no leakage" would be
-	// trivially satisfiable by a gateway that returns nothing at all.
-	for i, p := range parties {
-		for _, h := range ownTxs[i] {
-			if tx, _, err := p.Eth.TransactionByHash(ctx, h); err != nil || tx == nil {
-				t.Errorf("ns=%s lost its own tx %s: %v", p.Namespace, h, err)
-			}
-		}
-	}
+	assertOwnTxsVisible(t, parties, ownTxs)
 }
