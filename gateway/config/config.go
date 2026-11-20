@@ -90,7 +90,6 @@ type Logging struct {
 // DB holds the database paths for the gateway.
 type DB struct {
 	ConnString string `mapstructure:"connection-string" yaml:"connection-string"` // SQLite connection string for blocks, transactions, and logs
-	TriePath   string `mapstructure:"trie-path"         yaml:"trie-path"`         // PebbleDB directory for state root trie; empty = in-memory
 }
 
 // Gateway contains configuration for the gateway component.
@@ -172,6 +171,16 @@ type DepGraphQueue struct {
 	// dependents are not stranded by silent orderer loss. Zero means the
 	// built-in default; a negative value disables the reaper.
 	TrackedTimeout time.Duration `mapstructure:"tracked-timeout" yaml:"tracked-timeout"`
+	// MaxMVCCRetries is how many extra attempts a transaction gets after the
+	// committer rejects it with an MVCC conflict. Only a positive value counts;
+	// anything else means the built-in default. Retries cannot be turned off:
+	// exhausting them is itself a fault (see DepGraphQueue.giveUp), so a gateway
+	// that stops retrying is blind to it rather than free of it.
+	//
+	// Keep it small. The sender's later nonces stay parked while a transaction
+	// retries, and the gate's reaper drops them after defaultParkedTTL, so a
+	// budget outlasting that TTL wins the retry into an already-discarded pipeline.
+	MaxMVCCRetries int `mapstructure:"max-mvcc-retries" yaml:"max-mvcc-retries"`
 }
 
 // DefaultVhosts is used when Gateway.Vhosts is unset.

@@ -18,25 +18,26 @@ import (
 	fc "github.com/hyperledger/fabric-x-evm/common"
 	"github.com/hyperledger/fabric-x-evm/gateway/domain"
 	"github.com/hyperledger/fabric-x-evm/gateway/storage"
-	"github.com/hyperledger/fabric-x-evm/gateway/storage/trie"
 	"github.com/hyperledger/fabric-x-sdk/blocks"
 	"github.com/hyperledger/fabric-x-sdk/state/sqlite"
 )
 
-// Chain owns the block storage and state trie. It implements blocks.BlockHandler
-// (for block ingestion) and core.Store (via the embedded *storage.Store, for API queries).
+// Chain owns the block storage. It implements blocks.BlockHandler (for block
+// ingestion) and core.Store (via the embedded *storage.Store, for API queries).
+//
+// It computes no state root: every block reports the empty-trie root (see
+// docs/COMPATIBILITY.md). gateway/storage/trie stays for the conformance tests,
+// which can replay read-write sets into it (-verify_root).
 type Chain struct {
 	*storage.Store
 	db       *sql.DB
-	ts       *trie.Store
 	prevHash common.Hash // Ethereum hash of last committed block; seeded from DB on startup
 }
 
-// NewChain opens the SQLite database and trie store, seeds state from the latest committed
-// block, and returns a ready Chain. dbConnStr uses the modernc SQLite DSN format;
-// triePath is the directory for the PebbleDB trie (empty string = in-memory).
+// NewChain opens the SQLite database, seeds the parent hash from the latest committed
+// block, and returns a ready Chain. dbConnStr uses the modernc SQLite DSN format.
 // The caller must register the SQLite driver (e.g. _ "modernc.org/sqlite") before calling.
-func NewChain(dbConnStr, triePath string, withTrie bool) (*Chain, error) {
+func NewChain(dbConnStr string) (*Chain, error) {
 	db, err := sqlite.Open(dbConnStr)
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
@@ -48,33 +49,21 @@ func NewChain(dbConnStr, triePath string, withTrie bool) (*Chain, error) {
 		return nil, fmt.Errorf("init block store: %w", err)
 	}
 
-	// Seed trie root and parent hash from the latest committed block so state
-	// resumes correctly after a restart.
-	var initialRoot, prevHash common.Hash
+	// Seed the parent hash from the latest committed block so the chain resumes
+	// correctly after a restart.
+	var prevHash common.Hash
 	if latest, err := blockStore.LatestBlock(context.Background(), false); err == nil && latest != nil {
-		initialRoot = common.BytesToHash(latest.StateRoot)
 		prevHash = common.BytesToHash(latest.BlockHash)
 	}
 
-	var ts *trie.Store
-	if withTrie {
-		ts, err = trie.New(triePath, initialRoot)
-		if err != nil {
-			db.Close()
-			return nil, fmt.Errorf("open trie store: %w", err)
-		}
-	}
-
-	return &Chain{Store: blockStore, db: db, ts: ts, prevHash: prevHash}, nil
+	return &Chain{Store: blockStore, db: db, prevHash: prevHash}, nil
 }
 
-// Handle implements blocks.BlockHandler. Order matters: the trie
-// commits before InsertBlock, so a crash between them never leaves SQL ahead
-// of the MPT, and prevHash only advances after InsertBlock succeeds, so a
-// failed insert never publishes a tip the store doesn't hold.
+// Handle implements blocks.BlockHandler. prevHash only advances after InsertBlock
+// succeeds, so a failed insert never publishes a tip the store doesn't hold.
 //
-// Re-delivering an already-stored block is safe: the trie apply and
-// InsertBlock/InsertTransaction/InsertLog are all idempotent under replay.
+// Re-delivering an already-stored block is safe: InsertBlock/InsertTransaction/
+// InsertLog are all idempotent under replay.
 func (c *Chain) Handle(ctx context.Context, b blocks.Block) error {
 	logger.Debugf("Chain.Handle() block=%d txs=%d", b.Number, len(b.Transactions))
 	ebl, err := ConvertToDomain(b)
@@ -87,17 +76,18 @@ func (c *Chain) Handle(ctx context.Context, b blocks.Block) error {
 		return err
 	}
 
+	// An MVCC-rejected transaction wrote nothing, did not consume its nonce, and
+	// is about to be executed again, so storing a row would publish a status=0
+	// receipt for a transaction still in flight -- and the client would resubmit
+	// at a nonce that is still ours. Unstored, the hash keeps answering "pending"
+	// while the queue tracks it across retries.
+	//
+	// Only the row is dropped: later handlers still get the whole block, so
+	// DepGraphQueue sees the conflict and retries it.
+	ebl.Transactions = withoutRetriableConflicts(ebl.Transactions)
+
 	ebl.ParentHash = c.prevHash.Bytes()
-	if c.ts != nil {
-		stateRoot, err := c.ts.Commit(ctx, b)
-		if err != nil {
-			logger.Warnf("Chain.Handle() block=%d trie commit error: %v", b.Number, err)
-			return err // irrecoverable
-		}
-		ebl.StateRoot = stateRoot.Bytes()
-	} else {
-		ebl.StateRoot = types.EmptyRootHash[:]
-	}
+	ebl.StateRoot = types.EmptyRootHash[:]
 
 	if err := c.Store.InsertBlock(ctx, ebl); err != nil {
 		logger.Warnf("Chain.Handle() block=%d insert error: %v", b.Number, err)
@@ -107,6 +97,34 @@ func (c *Chain) Handle(ctx context.Context, b blocks.Block) error {
 	c.prevHash = common.BytesToHash(ebl.BlockHash)
 	logger.Debugf("Chain.Handle() block=%d committed prevHash=%s", b.Number, c.prevHash.Hex())
 	return nil
+}
+
+// withoutRetriableConflicts drops the transactions that will be retried, so no
+// receipt is published for an attempt that is about to be superseded.
+//
+// Only MVCC conflicts qualify: every other failure is final and the client is
+// entitled to its receipt. A conflict past the retry budget is final too, but
+// DepGraphQueue owns the budget so this cannot tell, and drops that row as well.
+// That one reads as unknown rather than pending: untrackOrRetry untracks it
+// while this same block is handled, and the nonce gate never held it (anything
+// the queue tracks was enqueued at the expected nonce, not parked). No row, no
+// entry, nothing parked — TransactionByHash finds nothing and the hash answers
+// null.
+//
+// The gate's reaper drops the sender's *later* transactions instead: the conflict
+// did not consume its nonce, so they stay parked behind a gap until a
+// resubmission at that nonce fills it, or defaultParkedTTL expires.
+func withoutRetriableConflicts(txs []domain.Transaction) []domain.Transaction {
+	kept := make([]domain.Transaction, 0, len(txs))
+	for _, tx := range txs {
+		if tx.FabricTxStatus == blocks.StatusMVCCConflict {
+			logger.Warnf("Chain.Handle() tx %s rejected by an MVCC conflict: not storing a receipt, it will be retried",
+				common.BytesToHash(tx.TxHash).Hex())
+			continue
+		}
+		kept = append(kept, tx)
+	}
+	return kept
 }
 
 // EnsureGenesisBlock inserts an empty block 0 if the store has no blocks yet, so
@@ -135,11 +153,8 @@ func (c *Chain) EnsureGenesisBlock(ctx context.Context) error {
 	return nil
 }
 
-// Close releases the trie and database resources.
+// Close releases the database.
 func (c *Chain) Close() error {
-	if c.ts != nil {
-		c.ts.Close()
-	}
 	return c.db.Close()
 }
 
