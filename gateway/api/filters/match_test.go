@@ -147,7 +147,7 @@ func TestLogsFromBlock_DenseTransactionIndex(t *testing.T) {
 	addr := common.HexToAddress("0x00000000000000000000000000000000000000aa")
 	rawA := mustEthTxBytes(t)
 	rawB := mustEthTxBytes(t)
-	events := mustLogEvents(t, []state.Log{{Address: addr.Bytes()}})
+	events := mustLogEvents(t, []fc.Log{{Address: addr.Bytes()}})
 
 	b := blocks.Block{
 		Number: 9,
@@ -193,12 +193,12 @@ func TestLogsFromBlock_DenseTransactionIndex(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("len=%d want 2", len(got))
 	}
-	// Dense indices: success=0, revert=1, mvcc=2, success=3.
+	// Dense indices: success=0, revert=1, mvcc skipped (not stored), success=2.
 	if got[0].TxIndex != 0 {
 		t.Fatalf("first log TxIndex=%d want 0", got[0].TxIndex)
 	}
-	if got[1].TxIndex != 3 {
-		t.Fatalf("second log TxIndex=%d want 3", got[1].TxIndex)
+	if got[1].TxIndex != 2 {
+		t.Fatalf("second log TxIndex=%d want 2", got[1].TxIndex)
 	}
 }
 

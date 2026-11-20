@@ -85,6 +85,10 @@ func (c *Chain) Handle(ctx context.Context, b blocks.Block) error {
 	// Only the row is dropped: later handlers still get the whole block, so
 	// DepGraphQueue sees the conflict and retries it.
 	ebl.Transactions = withoutRetriableConflicts(ebl.Transactions)
+	// ConvertToDomain numbered over every EVM tx, including ones we just
+	// dropped. Renumber so stored receipts stay dense (0..n-1) over what
+	// eth_getBlock* actually returns after MVCC conflicts are held back.
+	densifyStoredTxIndexes(ebl.Transactions)
 
 	ebl.ParentHash = c.prevHash.Bytes()
 	ebl.StateRoot = types.EmptyRootHash[:]
@@ -125,6 +129,21 @@ func withoutRetriableConflicts(txs []domain.Transaction) []domain.Transaction {
 		kept = append(kept, tx)
 	}
 	return kept
+}
+
+// densifyStoredTxIndexes rewrites TxIndex (and matching log TxIndex / LogIndex)
+// over the transactions that will be inserted. Call after withoutRetriableConflicts.
+func densifyStoredTxIndexes(txs []domain.Transaction) {
+	logIndex := int64(0)
+	for i := range txs {
+		txIndex := int64(i)
+		txs[i].TxIndex = txIndex
+		for j := range txs[i].Logs {
+			txs[i].Logs[j].TxIndex = txIndex
+			txs[i].Logs[j].LogIndex = logIndex
+			logIndex++
+		}
+	}
 }
 
 // EnsureGenesisBlock inserts an empty block 0 if the store has no blocks yet, so

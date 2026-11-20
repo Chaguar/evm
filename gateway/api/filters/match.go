@@ -32,6 +32,11 @@ func logsFromBlock(b blocks.Block) []*types.Log {
 		if !ok {
 			continue
 		}
+		// Match ConvertToDomain / Chain.Handle: MVCC conflicts are not stored
+		// and must not occupy a dense transactionIndex slot.
+		if tx.Status == blocks.StatusMVCCConflict {
+			continue
+		}
 		txIndex := evmIndex
 		evmIndex++
 

@@ -487,6 +487,9 @@ func TestChain_Handle_MVCCConflictIsNotStored(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, got)
 	assert.Equal(t, blocks.StatusCommitted, got.FabricTxStatus)
+	// After #450 drops the MVCC row, the kept tx must stay dense over what is
+	// stored (Fabric Number was 1; stored transactionIndex must be 0).
+	assert.Equal(t, int64(0), got.TxIndex, "transactionIndex must be dense over stored txs")
 }
 
 // Every other failure is final, so its receipt is stored: the client is entitled
