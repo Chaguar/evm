@@ -19,6 +19,8 @@ import (
 
 // logsFromBlock extracts Ethereum logs from a Fabric SDK block, attaching
 // block/tx context. Non-EVM and unsuccessful txs are skipped.
+// BlockTimestamp comes from the SDK block, matching DomainLogToTypes on the
+// historical eth_getLogs / eth_getFilterLogs path (#210 / #449).
 func logsFromBlock(b blocks.Block) []*types.Log {
 	blockHash := common.BytesToHash(b.Hash)
 	out := make([]*types.Log, 0)
@@ -50,14 +52,15 @@ func logsFromBlock(b blocks.Block) []*types.Log {
 				topics[i] = common.BytesToHash(t)
 			}
 			out = append(out, &types.Log{
-				Address:     common.BytesToAddress(l.Address),
-				Topics:      topics,
-				Data:        l.Data,
-				BlockNumber: b.Number,
-				TxHash:      txHash,
-				TxIndex:     txIndex,
-				BlockHash:   blockHash,
-				Index:       logIndex,
+				Address:        common.BytesToAddress(l.Address),
+				Topics:         topics,
+				Data:           l.Data,
+				BlockNumber:    b.Number,
+				TxHash:         txHash,
+				TxIndex:        txIndex,
+				BlockHash:      blockHash,
+				Index:          logIndex,
+				BlockTimestamp: uint64(b.Timestamp),
 			})
 			logIndex++
 		}
