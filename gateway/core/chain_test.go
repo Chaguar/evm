@@ -171,6 +171,45 @@ func TestConvertToDomain_SkipsNonEVMTx(t *testing.T) {
 	assert.Len(t, got.Transactions, 0)
 }
 
+// Ethereum transactionIndex must be dense over the EVM txs we keep. Fabric
+// tx.Number can have gaps after config / other-namespace / non-evm envelopes
+// are filtered, and clients walk 0..txCount-1 via eth_getTransactionByBlock*AndIndex.
+func TestConvertToDomain_DenseTransactionIndex(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	to := common.HexToAddress("0x1111111111111111111111111111111111111111")
+	eth := func(nonce uint64) []byte {
+		t.Helper()
+		signed, err := types.SignTx(types.NewTransaction(nonce, to, big.NewInt(1), 21000, big.NewInt(0), nil), types.HomesteadSigner{}, key)
+		require.NoError(t, err)
+		raw, err := signed.MarshalBinary()
+		require.NoError(t, err)
+		return raw
+	}
+
+	b := blocks.Block{
+		Number: 7,
+		Hash:   []byte("block-hash"),
+		Transactions: []blocks.Transaction{
+			{ID: "config", Number: 0, Status: blocks.StatusCommitted, EventName: "config"},
+			{ID: "evm-a", Number: 2, Status: blocks.StatusCommitted, EventName: co.ProposalTypeEVMTx, InputArgs: [][]byte{eth(0)}, Payload: succeededPayload(t)},
+			{ID: "other-ns", Number: 3, Status: blocks.StatusCommitted, EventName: "event", InputArgs: [][]byte{eth(99)}},
+			{ID: "evm-mvcc", Number: 4, Status: blocks.StatusMVCCConflict, EventName: co.ProposalTypeEVMTx, InputArgs: [][]byte{eth(1)}, Payload: succeededPayload(t)},
+			{ID: "evm-b", Number: 5, Status: blocks.StatusCommitted, EventName: co.ProposalTypeEVMTx, InputArgs: [][]byte{eth(2)}, Payload: succeededPayload(t)},
+		},
+	}
+
+	got, err := ConvertToDomain(b)
+	require.NoError(t, err)
+	require.Len(t, got.Transactions, 3)
+	assert.Equal(t, "evm-a", got.Transactions[0].FabricTxID)
+	assert.Equal(t, int64(0), got.Transactions[0].TxIndex)
+	assert.Equal(t, "evm-mvcc", got.Transactions[1].FabricTxID)
+	assert.Equal(t, int64(1), got.Transactions[1].TxIndex)
+	assert.Equal(t, "evm-b", got.Transactions[2].FabricTxID)
+	assert.Equal(t, int64(2), got.Transactions[2].TxIndex)
+}
+
 // Status and gas come from the Payload; cumulative gas adds up in block order.
 func TestConvertToDomain_StatusAndGasFromPayload(t *testing.T) {
 	key, err := crypto.GenerateKey()
@@ -449,6 +488,9 @@ func TestChain_Handle_MVCCConflictIsNotStored(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, got)
 	assert.Equal(t, blocks.StatusCommitted, got.FabricTxStatus)
+	// After #450 drops the MVCC row, the kept tx must stay dense over what is
+	// stored (Fabric Number was 1; stored transactionIndex must be 0).
+	assert.Equal(t, int64(0), got.TxIndex, "transactionIndex must be dense over stored txs")
 }
 
 // Every other failure is final, so its receipt is stored: the client is entitled
