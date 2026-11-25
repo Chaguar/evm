@@ -17,6 +17,7 @@ import (
 	"github.com/hyperledger/fabric-x-evm/endorser/execution"
 	"github.com/hyperledger/fabric-x-sdk/blocks"
 	"github.com/hyperledger/fabric-x-sdk/endorsement"
+	"github.com/hyperledger/fabric-x-sdk/state"
 )
 
 // BalancePrimingConfig configures automatic ERC-20 balance priming.
@@ -52,14 +53,14 @@ type BalancePrimingExecutor struct {
 // NewBalancePrimingExecutor creates a new executor with balance priming support.
 func NewBalancePrimingExecutor(
 	namespace string,
-	kvs execution.KVSSnapshotter,
+	kvs state.Snapshotter,
 	evmConfig execution.EVMConfig,
 	monotonicVersions bool,
 	balancePriming *BalancePrimingConfig,
 	blockContext *vm.BlockContext,
 ) (*BalancePrimingExecutor, error) {
 	// Begin a new reader to get snapshot isolation
-	reader, err := kvs.NewSnapshot(nil)
+	reader, err := kvs.Snapshot(context.TODO())
 	if err != nil {
 		return nil, err
 	}

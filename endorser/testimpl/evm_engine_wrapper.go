@@ -14,6 +14,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/hyperledger/fabric-x-evm/endorser/execution"
 	"github.com/hyperledger/fabric-x-sdk/endorsement"
+	"github.com/hyperledger/fabric-x-sdk/state"
 )
 
 // EVMEngineWrapper wraps an EVMEngine so that it executes with a
@@ -22,7 +23,7 @@ type EVMEngineWrapper struct {
 	*execution.EVMEngine
 	balancePriming    *BalancePrimingConfig
 	namespace         string
-	kvs               execution.KVSSnapshotter
+	kvs               state.Snapshotter
 	evmConfig         execution.EVMConfig
 	monotonicVersions bool
 }
@@ -32,7 +33,7 @@ type EVMEngineWrapper struct {
 // The wrapper needs access to the engine's configuration to create custom executors.
 func NewEVMEngineWrapper(
 	namespace string,
-	kvs execution.KVSSnapshotter,
+	kvs state.Snapshotter,
 	evmConfig execution.EVMConfig,
 	monotonicVersions bool,
 	engine *execution.EVMEngine,
