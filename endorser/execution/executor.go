@@ -160,11 +160,10 @@ func NewResult(rws blocks.ReadWriteSet, logs []Log, md *endorsementpb.ExecutionM
 // every call gets "now".
 // maxUsedGas is the EVM gas the simulation needed before EIP-3529 refunds are
 // credited; 0 when the call is rejected before ApplyMessage runs.
-func (e *EVMEngine) Call(msg ethereum.CallMsg, blockNumber *big.Int) (ret []byte, maxUsedGas uint64, err error) {
+func (e *EVMEngine) Call(ctx context.Context, msg ethereum.CallMsg, blockNumber *big.Int) (ret []byte, maxUsedGas uint64, err error) {
 	logger.Debugf("EVMEngine.Call() called with to=%s blockNumber=%v", msg.To, blockNumber)
 	blockTime := uint64(time.Now().Unix())
-	// Call has no ctx of its own yet.
-	ex, err := e.NewTxExecutor(context.TODO(), blockNumber, blockTime)
+	ex, err := e.NewTxExecutor(ctx, blockNumber, blockTime)
 	if err != nil {
 		logger.Warnf("EVMEngine.Call() failed to create executor: %v", err)
 		return nil, 0, err

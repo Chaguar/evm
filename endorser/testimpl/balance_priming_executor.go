@@ -52,6 +52,7 @@ type BalancePrimingExecutor struct {
 
 // NewBalancePrimingExecutor creates a new executor with balance priming support.
 func NewBalancePrimingExecutor(
+	ctx context.Context,
 	namespace string,
 	kvs state.Snapshotter,
 	evmConfig execution.EVMConfig,
@@ -60,12 +61,12 @@ func NewBalancePrimingExecutor(
 	blockContext *vm.BlockContext,
 ) (*BalancePrimingExecutor, error) {
 	// Begin a new reader to get snapshot isolation
-	reader, err := kvs.Snapshot(context.TODO())
+	reader, err := kvs.Snapshot(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	stateDB, err := execution.NewStateDB(context.TODO(), reader, namespace, monotonicVersions)
+	stateDB, err := execution.NewStateDB(ctx, reader, namespace, monotonicVersions)
 	if err != nil {
 		reader.Close()
 		return nil, err

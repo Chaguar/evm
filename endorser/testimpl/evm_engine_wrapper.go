@@ -55,7 +55,7 @@ func (w *EVMEngineWrapper) SetBalancePriming(config *BalancePrimingConfig) {
 // Execute runs a state-changing transaction and returns the EVM result.
 // blockTime is the Unix second for EVM block.timestamp.
 func (w *EVMEngineWrapper) Execute(ctx context.Context, tx *types.Transaction, blockTime uint64) (endorsement.ExecutionResult, error) {
-	ex, err := w.newBalancePrimingExecutor()
+	ex, err := w.newBalancePrimingExecutor(ctx)
 	if err != nil {
 		return endorsement.ExecutionResult{}, err
 	}
@@ -70,8 +70,8 @@ func (w *EVMEngineWrapper) Execute(ctx context.Context, tx *types.Transaction, b
 // Call executes a read-only call against the state.
 // maxUsedGas is the EVM gas the simulation needed before EIP-3529 refunds are
 // credited.
-func (w *EVMEngineWrapper) Call(msg ethereum.CallMsg, blockNumber *big.Int) ([]byte, uint64, error) {
-	ex, err := w.newBalancePrimingExecutor()
+func (w *EVMEngineWrapper) Call(ctx context.Context, msg ethereum.CallMsg, blockNumber *big.Int) ([]byte, uint64, error) {
+	ex, err := w.newBalancePrimingExecutor(ctx)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -81,8 +81,9 @@ func (w *EVMEngineWrapper) Call(msg ethereum.CallMsg, blockNumber *big.Int) ([]b
 }
 
 // newBalancePrimingExecutor creates an executor with balance priming support.
-func (w *EVMEngineWrapper) newBalancePrimingExecutor() (*BalancePrimingExecutor, error) {
+func (w *EVMEngineWrapper) newBalancePrimingExecutor(ctx context.Context) (*BalancePrimingExecutor, error) {
 	return NewBalancePrimingExecutor(
+		ctx,
 		w.namespace,
 		w.kvs,
 		w.evmConfig,
