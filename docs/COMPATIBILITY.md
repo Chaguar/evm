@@ -232,10 +232,10 @@ network values.
 | `BASEFEE`                   | `0`                                             | actual EIP-1559 base fee    |
 | `BLOBBASEFEE`               | ~1 wei (calculated from `ExcessBlobGas = 0`)    | actual EIP-4844 blob fee    |
 | `TIMESTAMP`                 | gateway-supplied on **tx execute**; wall clock on **eth_call** (see below) | actual Unix timestamp of the block |
-| `NUMBER`                    | `0` on tx execution; block arg on `eth_call`    | Ethereum block number       |
+| `NUMBER`                    | gateway height + 1 on **tx execute**; committed height (or block arg) on **eth_call** | Ethereum block number       |
 
 **Transaction execution (`TIMESTAMP`)**: the gateway stamps wall time once per
-`ExecuteTransaction` and sends the same value to every endorser. The timestamp is **required**
+`ExecuteEthTx` and sends the same value to every endorser. The timestamp is **required**
 (zero / missing is rejected). Each endorser checks that the value is within a configurable window
 of its local clock (defaults: 10s future / 60s past, `max-timestamp-future` /
 `max-timestamp-past`), then uses it as-is for EVM `block.timestamp` so multi-org RWsets stay
@@ -251,20 +251,35 @@ Tune `max-timestamp-past` (and carefully `max-timestamp-future`) to cover expect
 drift plus network delay. Prefer NTP-synced hosts; do not widen future skew aggressively (it
 affects time-gated unlock checks).
 
-**Transaction execution (`NUMBER`)**: the EVM `NUMBER` is still `0` (the block context number is
-never set for execute), even though state is read from the latest committed block. So
-`block.number` inside an executed transaction always reads `0` until a separate fix lands.
+**Transaction execution (`NUMBER`)**: like the timestamp, the gateway picks the block number once
+per `ExecuteEthTx` (its committed height + 1, the block the tx is expected to land in) and
+sends the same value to every endorser, which uses it as-is. The block number is **required**
+(zero / missing is rejected). Endorsement is pre-order, so under batching or concurrent load the
+tx can land in a later block than the `block.number` it executed with, never an earlier one; the
+receipt's `blockNumber` is the actual block. State is still read from the endorser's latest
+committed block, not pinned to that number. `eth_estimateGas` on `latest` / `pending` runs on the
+pending block: the endorser's latest committed state with `NUMBER` = its height + 1, so gas that
+depends on `block.number` (e.g. a new Votes checkpoint) matches the later execution.
+
+**Trusting the gateway with `NUMBER`**: endorsers do **not** check the block number against their
+own ledger height, so the gateway is trusted to choose it. This sits within the trust a deployment
+already places in its single gateway, which decides which transactions are submitted, in what order
+and when, and picks `TIMESTAMP` within the skew window. Unlike on Ethereum, a contract cannot then
+rely on `block.number` being exact: a misbehaving gateway could execute a transaction as if in an
+earlier or later block (for example a Governor vote after its deadline, or a vesting release ahead
+of schedule).
 
 **Why these are fixed**: endorsement happens *before* ordering, and every endorser must produce a
 byte-identical read-write set. An endorser that sampled its own clock, randomness or block height
 would diverge from its peers and break the endorsement policy. Ethereum has one proposer picking
-these values once; there is no equivalent role here. `TIMESTAMP` escapes this because the gateway
-supplies a single agreed value (above). `NUMBER` does not: the committed height is agreed but need
-not match the eventual commit height — a bounded, gateway-supplied `NUMBER` is tracked in **#278**.
+these values once; there is no equivalent role here. `TIMESTAMP` and `NUMBER` escape this because
+the gateway supplies a single agreed value for each (above), which endorsers bounds-check
+(`TIMESTAMP`) or trust (`NUMBER`).
 `PREVRANDAO` has no agreed beacon to draw on at all.
 
 **`eth_call` with a block number**: the state DB is correctly snapshotted at the requested height,
-and the EVM `NUMBER` opcode is set to that block-number argument (`0` for `latest`). `TIMESTAMP`,
+and the EVM `NUMBER` opcode is set to that block-number argument (the endorser's committed height
+for `latest`, matching `eth_blockNumber` when the gateway is in sync). `TIMESTAMP`,
 however, is the endorser's **current** wall-clock Unix second, whatever block you ask for. The
 determinism constraint that forces a gateway-supplied stamp on `Execute` does not apply here — a
 call produces no read-write set, so there is nothing for endorsers to agree on — and using the

@@ -360,12 +360,13 @@ type stubBackend struct {
 	nonceErr   error
 
 	// Send / Call / EstimateGas
-	sendErr  error
-	lastSent *types.Transaction
-	callRet  []byte
-	callErr  error
-	estGas   uint64
-	estErr   error
+	sendErr   error
+	lastSent  *types.Transaction
+	callRet   []byte
+	callErr   error
+	callBlock *big.Int // last block CallContract was called with
+	estGas    uint64
+	estErr    error
 
 	// Tx reads
 	txByHash         map[common.Hash]*domain.Transaction
@@ -462,6 +463,7 @@ func (s *stubBackend) SendTransaction(ctx context.Context, tx *types.Transaction
 	return s.sendErr
 }
 func (s *stubBackend) CallContract(ctx context.Context, call ethereum.CallMsg, blockNumber *big.Int) ([]byte, error) {
+	s.callBlock = blockNumber
 	return s.callRet, s.callErr
 }
 func (s *stubBackend) EstimateGas(ctx context.Context, call ethereum.CallMsg, blockNumber *big.Int) (uint64, error) {

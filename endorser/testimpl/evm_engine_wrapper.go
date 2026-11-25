@@ -12,6 +12,7 @@ import (
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/hyperledger/fabric-x-evm/endorser/api"
 	"github.com/hyperledger/fabric-x-evm/endorser/execution"
 	"github.com/hyperledger/fabric-x-sdk/endorsement"
 )
@@ -52,14 +53,15 @@ func (w *EVMEngineWrapper) SetBalancePriming(config *BalancePrimingConfig) {
 }
 
 // Execute runs a state-changing transaction and returns the EVM result.
-// blockTime is the Unix second for EVM block.timestamp.
-func (w *EVMEngineWrapper) Execute(ctx context.Context, tx *types.Transaction, blockTime uint64) (endorsement.ExecutionResult, error) {
+// blockNumber and blockTime are EVM block.number and block.timestamp.
+func (w *EVMEngineWrapper) Execute(ctx context.Context, tx *types.Transaction, blockNumber, blockTime uint64) (endorsement.ExecutionResult, error) {
 	ex, err := w.newBalancePrimingExecutor()
 	if err != nil {
 		return endorsement.ExecutionResult{}, err
 	}
 	defer ex.Close()
 
+	ex.BlockCtx.BlockNumber = new(big.Int).SetUint64(blockNumber)
 	if blockTime != 0 {
 		ex.BlockCtx.Time = blockTime
 	}
@@ -75,6 +77,11 @@ func (w *EVMEngineWrapper) Call(msg ethereum.CallMsg, blockNumber *big.Int) ([]b
 		return nil, 0, err
 	}
 	defer ex.Close()
+
+	// NUMBER is the snapshot's height; the pending block runs as the next block.
+	if api.IsPending(blockNumber) {
+		ex.BlockCtx.BlockNumber = new(big.Int).Add(ex.BlockCtx.BlockNumber, big.NewInt(1))
+	}
 
 	return ex.Call(msg)
 }

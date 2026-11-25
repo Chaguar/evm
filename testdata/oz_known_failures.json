@@ -1128,170 +1128,14 @@
     "note": "eth_estimateGas escalates to the 10M ceiling instead of surfacing the revert the test expects; the call is expected to fail, not to need more gas."
   },
   {
-    "id": "ERC20TransferAuthorization with blockNumber cancelAuthorization cancels the next nonce after consuming the previous one",
-    "cause": "execution reverted"
-  },
-  {
-    "id": "ERC20TransferAuthorization with blockNumber cancelAuthorization prevents usage of canceled authorization in transferWithAuthorization"
-  },
-  {
-    "id": "ERC20TransferAuthorization with blockNumber cancelAuthorization shares the keyed counter between transfer and receive",
-    "cause": "execution reverted"
-  },
-  {
-    "id": "ERC20TransferAuthorization with blockNumber cancelAuthorization with bytes signature prevents usage of canceled authorization by an ERC1271 wallet"
-  },
-  {
-    "id": "ERC20TransferAuthorization with blockNumber receiveWithAuthorization accepts holder signature when called by recipient",
-    "cause": "execution reverted"
-  },
-  {
-    "id": "ERC20TransferAuthorization with blockNumber receiveWithAuthorization rejects out-of-order nonces sharing the same key"
-  },
-  {
-    "id": "ERC20TransferAuthorization with blockNumber receiveWithAuthorization rejects reused signature",
-    "cause": "execution reverted"
-  },
-  {
-    "id": "ERC20TransferAuthorization with blockNumber receiveWithAuthorization with bytes signature accepts ERC1271 wallet signature when called by recipient",
-    "cause": "execution reverted"
-  },
-  {
-    "id": "ERC20TransferAuthorization with blockNumber receiveWithAuthorization with bytes signature accepts holder signature when called by recipient",
-    "cause": "execution reverted"
-  },
-  {
-    "id": "ERC20TransferAuthorization with blockNumber transferWithAuthorization accepts holder signature",
-    "cause": "execution reverted"
-  },
-  {
-    "id": "ERC20TransferAuthorization with blockNumber transferWithAuthorization rejects out-of-order nonces sharing the same key"
-  },
-  {
-    "id": "ERC20TransferAuthorization with blockNumber transferWithAuthorization rejects reused signature",
-    "cause": "execution reverted"
-  },
-  {
-    "id": "ERC20TransferAuthorization with blockNumber transferWithAuthorization with bytes signature accepts ERC1271 wallet signature",
-    "cause": "execution reverted"
-  },
-  {
-    "id": "ERC20TransferAuthorization with blockNumber transferWithAuthorization with bytes signature accepts holder signature",
-    "cause": "execution reverted"
-  },
-  {
-    "id": "ERC20TransferAuthorization with blockNumber transferWithAuthorization works with different keys in parallel",
-    "cause": "execution reverted"
-  },
-  {
-    "id": "ERC20Votes vote with blockNumber Compound test suite getPastVotes generally returns the voting balance at the appropriate checkpoint",
-    "cause": "execution reverted"
-  },
-  {
-    "id": "ERC20Votes vote with blockNumber Compound test suite getPastVotes returns 0 if there are no checkpoints",
-    "cause": "fixed-block-number",
-    "note": "block.number is hardcoded at 0 (COMPATIBILITY.md); manifests as block-number diffs or checkpoint-count mismatches since checkpoints never advance."
-  },
-  {
-    "id": "ERC20Votes vote with blockNumber Compound test suite getPastVotes returns the latest block if >= last checkpoint block",
-    "cause": "execution reverted"
-  },
-  {
-    "id": "ERC20Votes vote with blockNumber Compound test suite getPastVotes returns zero if < first checkpoint block",
-    "cause": "execution reverted"
-  },
-  {
     "id": "ERC20Votes vote with blockNumber Compound test suite numCheckpoints does not add more than one checkpoint in a block",
     "cause": "transaction already pending"
-  },
-  {
-    "id": "ERC20Votes vote with blockNumber Compound test suite numCheckpoints returns the number of checkpoints for a delegate",
-    "cause": "fixed-block-number",
-    "note": "block.number is hardcoded at 0 (COMPATIBILITY.md); manifests as block-number diffs or checkpoint-count mismatches since checkpoints never advance."
   },
   {
     "id": "ERC20Votes vote with blockNumber ERC-6372 behavior in blockNumber mode should have a correct clock value",
     "cause": "hardhat-block-rpc",
     "note": "block.number is hardcoded at 0 (COMPATIBILITY.md); manifests as block-number diffs or checkpoint-count mismatches since checkpoints never advance.",
     "flaky": true
-  },
-  {
-    "id": "ERC20Votes vote with blockNumber change delegation call",
-    "cause": "fixed-block-number",
-    "note": "block.number is hardcoded at 0 (COMPATIBILITY.md); manifests as block-number diffs or checkpoint-count mismatches since checkpoints never advance."
-  },
-  {
-    "id": "ERC20Votes vote with blockNumber getPastTotalSupply generally returns the voting balance at the appropriate checkpoint",
-    "cause": "execution reverted"
-  },
-  {
-    "id": "ERC20Votes vote with blockNumber getPastTotalSupply returns 0 if there are no checkpoints",
-    "cause": "fixed-block-number",
-    "note": "block.number is hardcoded at 0 (COMPATIBILITY.md); manifests as block-number diffs or checkpoint-count mismatches since checkpoints never advance."
-  },
-  {
-    "id": "ERC20Votes vote with blockNumber getPastTotalSupply returns the latest block if >= last checkpoint block",
-    "cause": "execution reverted"
-  },
-  {
-    "id": "ERC20Votes vote with blockNumber getPastTotalSupply returns zero if < first checkpoint block",
-    "cause": "execution reverted"
-  },
-  {
-    "id": "ERC20Votes vote with blockNumber recent checkpoints",
-    "cause": "fixed-block-number",
-    "note": "block.number is hardcoded at 0 (COMPATIBILITY.md); manifests as block-number diffs or checkpoint-count mismatches since checkpoints never advance."
-  },
-  {
-    "id": "ERC20Votes vote with blockNumber run votes workflow Compound test suite getPastVotes returns 0 if there are no checkpoints",
-    "cause": "fixed-block-number",
-    "note": "block.number is hardcoded at 0 (COMPATIBILITY.md); manifests as block-number diffs or checkpoint-count mismatches since checkpoints never advance."
-  },
-  {
-    "id": "ERC20Votes vote with blockNumber run votes workflow Compound test suite getPastVotes returns the latest block if >= last checkpoint block",
-    "cause": "execution reverted"
-  },
-  {
-    "id": "ERC20Votes vote with blockNumber run votes workflow Compound test suite getPastVotes returns zero if < first checkpoint block",
-    "cause": "execution reverted"
-  },
-  {
-    "id": "ERC20Votes vote with blockNumber run votes workflow delegation with signature delegation update",
-    "cause": "fixed-block-number",
-    "note": "block.number is hardcoded at 0 (COMPATIBILITY.md); manifests as block-number diffs or checkpoint-count mismatches since checkpoints never advance."
-  },
-  {
-    "id": "ERC20Votes vote with blockNumber run votes workflow delegation with signature delegation with tokens",
-    "cause": "fixed-block-number",
-    "note": "block.number is hardcoded at 0 (COMPATIBILITY.md); manifests as block-number diffs or checkpoint-count mismatches since checkpoints never advance."
-  },
-  {
-    "id": "ERC20Votes vote with blockNumber run votes workflow delegation with signature with signature accept signed delegation",
-    "cause": "fixed-block-number",
-    "note": "block.number is hardcoded at 0 (COMPATIBILITY.md); manifests as block-number diffs or checkpoint-count mismatches since checkpoints never advance."
-  },
-  {
-    "id": "ERC20Votes vote with blockNumber run votes workflow getPastTotalSupply returns 0 if there are no checkpoints",
-    "cause": "fixed-block-number",
-    "note": "block.number is hardcoded at 0 (COMPATIBILITY.md); manifests as block-number diffs or checkpoint-count mismatches since checkpoints never advance."
-  },
-  {
-    "id": "ERC20Votes vote with blockNumber run votes workflow getPastTotalSupply returns the correct checkpointed total supply",
-    "cause": "execution reverted"
-  },
-  {
-    "id": "ERC20Votes vote with blockNumber set delegation call delegation with balance",
-    "cause": "fixed-block-number",
-    "note": "block.number is hardcoded at 0 (COMPATIBILITY.md); manifests as block-number diffs or checkpoint-count mismatches since checkpoints never advance."
-  },
-  {
-    "id": "ERC20Votes vote with blockNumber set delegation with signature accept signed delegation",
-    "cause": "fixed-block-number",
-    "note": "block.number is hardcoded at 0 (COMPATIBILITY.md); manifests as block-number diffs or checkpoint-count mismatches since checkpoints never advance."
-  },
-  {
-    "id": "ERC20Votes vote with blockNumber transfers \"after each\" hook for \"no delegation\"",
-    "cause": "execution reverted"
   },
   {
     "id": "ERC20Votes vote with timestamp Compound test suite getPastVotes generally returns the voting balance at the appropriate checkpoint",
@@ -1417,39 +1261,7 @@
     "note": "Same mechanism as CrosschainRemoteController: this test tampers with requests to force a call that always reverts empty even at the estimation ceiling; 'gas required exceeds allowance' isn't recognized as a CALL_EXCEPTION-shaped revert."
   },
   {
-    "id": "ERC3009 using blockNumber clock authorizationState returns true after the nonce is consumed",
-    "cause": "execution reverted"
-  },
-  {
-    "id": "ERC3009 using blockNumber clock receiveWithAuthorization accepts holder signature when called by recipient",
-    "cause": "execution reverted"
-  },
-  {
-    "id": "ERC3009 using blockNumber clock receiveWithAuthorization rejects reused nonce with ERC3009UsedAuthorization",
-    "cause": "execution reverted"
-  },
-  {
-    "id": "ERC3009 using blockNumber clock transferWithAuthorization accepts random nonces in any order",
-    "cause": "execution reverted"
-  },
-  {
-    "id": "ERC3009 using blockNumber clock transferWithAuthorization emits AuthorizationUsed and Transfer with the expected balance changes",
-    "cause": "execution reverted"
-  },
-  {
-    "id": "ERC3009 using blockNumber clock transferWithAuthorization rejects reused nonce with ERC3009UsedAuthorization",
-    "cause": "execution reverted"
-  },
-  {
-    "id": "ERC3009 using blockNumber clock transferWithAuthorization supports validBefore that points to an value beyond the type(uint48).max",
-    "cause": "execution reverted"
-  },
-  {
     "id": "ERC3009 using timestamp clock transferWithAuthorization rejects at the validBefore boundary (current == validBefore)"
-  },
-  {
-    "id": "ERC6372Utils blockNumber clock mode from uint48",
-    "cause": "execution reverted"
   },
   {
     "id": "ERC6372Utils timestamp clock mode from uint48",
@@ -1467,45 +1279,6 @@
     "cause": "hardhat-block-rpc",
     "note": "block.number is hardcoded at 0 (COMPATIBILITY.md); ERC-6372 clock() in blockNumber mode reads it directly.",
     "flaky": true
-  },
-  {
-    "id": "ERC721Votes vote with blockNumber run votes workflow Compound test suite getPastVotes returns 0 if there are no checkpoints",
-    "cause": "execution reverted"
-  },
-  {
-    "id": "ERC721Votes vote with blockNumber run votes workflow Compound test suite getPastVotes returns the latest block if >= last checkpoint block",
-    "cause": "execution reverted"
-  },
-  {
-    "id": "ERC721Votes vote with blockNumber run votes workflow Compound test suite getPastVotes returns zero if < first checkpoint block",
-    "cause": "execution reverted"
-  },
-  {
-    "id": "ERC721Votes vote with blockNumber run votes workflow delegation with signature delegation update",
-    "cause": "fixed-block-number",
-    "note": "block.number is hardcoded at 0 (COMPATIBILITY.md); manifests as block-number diffs or checkpoint-count mismatches since checkpoints never advance."
-  },
-  {
-    "id": "ERC721Votes vote with blockNumber run votes workflow delegation with signature delegation with tokens",
-    "cause": "fixed-block-number",
-    "note": "block.number is hardcoded at 0 (COMPATIBILITY.md); manifests as block-number diffs or checkpoint-count mismatches since checkpoints never advance."
-  },
-  {
-    "id": "ERC721Votes vote with blockNumber run votes workflow delegation with signature with signature accept signed delegation",
-    "cause": "fixed-block-number",
-    "note": "block.number is hardcoded at 0 (COMPATIBILITY.md); manifests as block-number diffs or checkpoint-count mismatches since checkpoints never advance."
-  },
-  {
-    "id": "ERC721Votes vote with blockNumber run votes workflow getPastTotalSupply returns 0 if there are no checkpoints",
-    "cause": "execution reverted"
-  },
-  {
-    "id": "ERC721Votes vote with blockNumber run votes workflow getPastTotalSupply returns the correct checkpointed total supply",
-    "cause": "execution reverted"
-  },
-  {
-    "id": "ERC721Votes vote with blockNumber transfers \"after each\" hook for \"no delegation\"",
-    "cause": "execution reverted"
   },
   {
     "id": "Governor using $ERC20Votes ERC-6372 behavior in blockNumber mode should have a correct clock value",
@@ -2573,9 +2346,6 @@
     "cause": "hardhat-time-rpc",
     "note": "Timing-sensitive: propose->vote->queue->execute needs real wall-clock time for votingDelay/votingPeriod/timelock-delay, but evm_increaseTime/evm_setNextBlockTimestamp are no-ops (COMPATIBILITY.md). Fast execution reaches the next step too soon and reverts, but passes if the run is slow enough for real time to catch up -- confirmed flipping under a CPU-throttled run.",
     "flaky": true
-  },
-  {
-    "id": "GovernorProposalGuardian using $ERC20Votes cancel proposal during active state \"before each\" hook for \"from proposal guardian\""
   },
   {
     "id": "GovernorProposalGuardian using $ERC20Votes set proposal guardian from governance"
@@ -3897,41 +3667,6 @@
     "flaky": true
   },
   {
-    "id": "Votes vote with blockNumber run votes workflow Compound test suite getPastVotes returns 0 if there are no checkpoints",
-    "cause": "execution reverted"
-  },
-  {
-    "id": "Votes vote with blockNumber run votes workflow Compound test suite getPastVotes returns the latest block if >= last checkpoint block",
-    "cause": "execution reverted"
-  },
-  {
-    "id": "Votes vote with blockNumber run votes workflow Compound test suite getPastVotes returns zero if < first checkpoint block",
-    "cause": "execution reverted"
-  },
-  {
-    "id": "Votes vote with blockNumber run votes workflow delegation with signature delegation update",
-    "cause": "fixed-block-number",
-    "note": "block.number is hardcoded at 0 (COMPATIBILITY.md); manifests as block-number diffs or checkpoint-count mismatches since checkpoints never advance."
-  },
-  {
-    "id": "Votes vote with blockNumber run votes workflow delegation with signature delegation with tokens",
-    "cause": "fixed-block-number",
-    "note": "block.number is hardcoded at 0 (COMPATIBILITY.md); manifests as block-number diffs or checkpoint-count mismatches since checkpoints never advance."
-  },
-  {
-    "id": "Votes vote with blockNumber run votes workflow delegation with signature with signature accept signed delegation",
-    "cause": "fixed-block-number",
-    "note": "block.number is hardcoded at 0 (COMPATIBILITY.md); manifests as block-number diffs or checkpoint-count mismatches since checkpoints never advance."
-  },
-  {
-    "id": "Votes vote with blockNumber run votes workflow getPastTotalSupply returns 0 if there are no checkpoints",
-    "cause": "execution reverted"
-  },
-  {
-    "id": "Votes vote with blockNumber run votes workflow getPastTotalSupply returns the correct checkpointed total supply",
-    "cause": "execution reverted"
-  },
-  {
     "id": "Votes vote with timestamp run votes workflow Compound test suite getPastVotes returns the latest block if >= last checkpoint block",
     "cause": "hardhat-time-rpc"
   },
@@ -3966,24 +3701,8 @@
     "messagePattern": "^transaction 0x[0-9a-fA-F]+ was dropped before it committed$"
   },
   {
-    "id": "VotesExtended checkpoint balances with blockNumber checkpoint balances",
-    "cause": "execution reverted"
-  },
-  {
-    "id": "VotesExtended checkpoint balances with blockNumber reverts if current timepoint <= timepoint",
-    "cause": "fixed-block-number"
-  },
-  {
     "id": "VotesExtended checkpoint balances with timestamp checkpoint balances",
     "cause": "execution reverted"
-  },
-  {
-    "id": "VotesExtended checkpoint delegates with blockNumber checkpoint delegates",
-    "cause": "execution reverted"
-  },
-  {
-    "id": "VotesExtended checkpoint delegates with blockNumber reverts if current timepoint <= timepoint",
-    "cause": "fixed-block-number"
   },
   {
     "id": "VotesExtended checkpoint delegates with timestamp checkpoint delegates",
@@ -3994,41 +3713,6 @@
     "cause": "hardhat-block-rpc",
     "note": "block.number is hardcoded at 0 (COMPATIBILITY.md); ERC-6372 clock() in blockNumber mode reads it directly.",
     "flaky": true
-  },
-  {
-    "id": "VotesExtended vote with blockNumber run votes workflow Compound test suite getPastVotes returns 0 if there are no checkpoints",
-    "cause": "execution reverted"
-  },
-  {
-    "id": "VotesExtended vote with blockNumber run votes workflow Compound test suite getPastVotes returns the latest block if >= last checkpoint block",
-    "cause": "execution reverted"
-  },
-  {
-    "id": "VotesExtended vote with blockNumber run votes workflow Compound test suite getPastVotes returns zero if < first checkpoint block",
-    "cause": "execution reverted"
-  },
-  {
-    "id": "VotesExtended vote with blockNumber run votes workflow delegation with signature delegation update",
-    "cause": "fixed-block-number",
-    "note": "block.number is hardcoded at 0 (COMPATIBILITY.md); manifests as block-number diffs or checkpoint-count mismatches since checkpoints never advance."
-  },
-  {
-    "id": "VotesExtended vote with blockNumber run votes workflow delegation with signature delegation with tokens",
-    "cause": "fixed-block-number",
-    "note": "block.number is hardcoded at 0 (COMPATIBILITY.md); manifests as block-number diffs or checkpoint-count mismatches since checkpoints never advance."
-  },
-  {
-    "id": "VotesExtended vote with blockNumber run votes workflow delegation with signature with signature accept signed delegation",
-    "cause": "fixed-block-number",
-    "note": "block.number is hardcoded at 0 (COMPATIBILITY.md); manifests as block-number diffs or checkpoint-count mismatches since checkpoints never advance."
-  },
-  {
-    "id": "VotesExtended vote with blockNumber run votes workflow getPastTotalSupply returns 0 if there are no checkpoints",
-    "cause": "execution reverted"
-  },
-  {
-    "id": "VotesExtended vote with blockNumber run votes workflow getPastTotalSupply returns the correct checkpointed total supply",
-    "cause": "execution reverted"
   },
   {
     "id": "VotesExtended vote with timestamp ERC-6372 behavior in timestamp mode should have a correct clock value",
@@ -4061,5 +3745,47 @@
   {
     "id": "VotesExtended vote with timestamp run votes workflow getPastTotalSupply returns the correct checkpointed total supply",
     "cause": "execution reverted"
+  },
+  {
+    "id": "GovernorCountingOverridable using $ERC20VotesExtendedMock cast override vote override after delegate vote",
+    "cause": "concurrent-tx-race",
+    "note": "Races: the fixture's GovernorHelper.delegate() fires self-delegate + transfer concurrently (Promise.all, no confirmation wait); the endorsement-time read snapshot goes stale before commit, so a delegation is lost and the vote weight comes out 0 (or partial) instead of the delegated balance. Hidden on block.number 0 by the \"before each\" hook failing first.",
+    "flaky": true
+  },
+  {
+    "id": "GovernorCountingOverridable using $ERC20VotesExtendedMock cast override vote override before delegate vote",
+    "cause": "concurrent-tx-race",
+    "note": "Races: the fixture's GovernorHelper.delegate() fires self-delegate + transfer concurrently (Promise.all, no confirmation wait); the endorsement-time read snapshot goes stale before commit, so a delegation is lost and the vote weight comes out 0 (or partial) instead of the delegated balance. Hidden on block.number 0 by the \"before each\" hook failing first.",
+    "flaky": true
+  },
+  {
+    "id": "GovernorCountingOverridable using $ERC20VotesExtendedMock cast override vote override before and after delegate vote",
+    "cause": "concurrent-tx-race",
+    "note": "Races: the fixture's GovernorHelper.delegate() fires self-delegate + transfer concurrently (Promise.all, no confirmation wait); the endorsement-time read snapshot goes stale before commit, so a delegation is lost and the vote weight comes out 0 (or partial) instead of the delegated balance. Hidden on block.number 0 by the \"before each\" hook failing first.",
+    "flaky": true
+  },
+  {
+    "id": "GovernorCountingOverridable using $ERC20VotesExtendedMock cast override vote vote (with delegated balance) and override (with self balance) are independent",
+    "cause": "concurrent-tx-race",
+    "note": "Races: the fixture's GovernorHelper.delegate() fires self-delegate + transfer concurrently (Promise.all, no confirmation wait); the endorsement-time read snapshot goes stale before commit, so a delegation is lost and the vote weight comes out 0 (or partial) instead of the delegated balance. Hidden on block.number 0 by the \"before each\" hook failing first.",
+    "flaky": true
+  },
+  {
+    "id": "GovernorCountingOverridable using $ERC20VotesExtendedMock cast override vote can not override vote twice",
+    "cause": "concurrent-tx-race",
+    "note": "Races: the fixture's GovernorHelper.delegate() fires self-delegate + transfer concurrently (Promise.all, no confirmation wait); the endorsement-time read snapshot goes stale before commit, so a delegation is lost and the vote weight comes out 0 (or partial) instead of the delegated balance. Hidden on block.number 0 by the \"before each\" hook failing first.",
+    "flaky": true
+  },
+  {
+    "id": "GovernorCountingOverridable using $ERC20VotesExtendedMock cast override vote can not vote twice",
+    "cause": "concurrent-tx-race",
+    "note": "Races: the fixture's GovernorHelper.delegate() fires self-delegate + transfer concurrently (Promise.all, no confirmation wait); the endorsement-time read snapshot goes stale before commit, so a delegation is lost and the vote weight comes out 0 (or partial) instead of the delegated balance. Hidden on block.number 0 by the \"before each\" hook failing first.",
+    "flaky": true
+  },
+  {
+    "id": "GovernorCountingOverridable using $ERC20VotesExtendedMock cast override vote by signature EOA signature",
+    "cause": "concurrent-tx-race",
+    "note": "Races: the fixture's GovernorHelper.delegate() fires self-delegate + transfer concurrently (Promise.all, no confirmation wait); the endorsement-time read snapshot goes stale before commit, so a delegation is lost and the vote weight comes out 0 (or partial) instead of the delegated balance. Hidden on block.number 0 by the \"before each\" hook failing first.",
+    "flaky": true
   }
 ]

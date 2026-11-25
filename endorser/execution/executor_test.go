@@ -38,7 +38,7 @@ func TestNewExecutor_WrapsStateDBWhenDebugEnabled(t *testing.T) {
 	}
 	eng := NewEVMEngine(Namespace, kvs, cfg, false)
 
-	ex, err := eng.NewTxExecutor(nil, uint64(1_700_000_000))
+	ex, err := eng.NewTxExecutor(nil, nil, uint64(1_700_000_000))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestExecute_MaxTxGas(t *testing.T) {
 			MaxTxGas:    maxTxGas,
 		}
 		eng := NewEVMEngine(Namespace, kvs, cfg, false)
-		ex, err := eng.NewTxExecutor(nil, uint64(1_700_000_000))
+		ex, err := eng.NewTxExecutor(nil, nil, uint64(1_700_000_000))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -198,7 +198,7 @@ func TestNewExecutor_NegativeBlockNumberResolvesToLatest(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ex, err := eng.NewTxExecutor(big.NewInt(-5), uint64(1_700_000_000))
+	ex, err := eng.NewTxExecutor(big.NewInt(-5), nil, uint64(1_700_000_000))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +219,7 @@ func TestNewExecutor_NegativeBlockNumberResolvesToLatest(t *testing.T) {
 func TestCall_ReportsPreRefundGasNotPostRefund(t *testing.T) {
 	eng, contract := newClearingContractEngine(t, "exec_refund")
 
-	ex, err := eng.NewTxExecutor(nil, uint64(1_700_000_000))
+	ex, err := eng.NewTxExecutor(nil, nil, uint64(1_700_000_000))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,7 +244,7 @@ func TestCall_ReportsPreRefundGasNotPostRefund(t *testing.T) {
 func TestEVMEngineExecute_ReportsPostRefundGas(t *testing.T) {
 	eng, contract := newClearingContractEngine(t, "exec_post_refund")
 
-	res, err := eng.Execute(t.Context(), signTestTx(t, types.NewTransaction(0, contract, big.NewInt(0), 100_000, big.NewInt(1), nil)), 1_700_000_000)
+	res, err := eng.Execute(t.Context(), signTestTx(t, types.NewTransaction(0, contract, big.NewInt(0), 100_000, big.NewInt(1), nil)), 1, 1_700_000_000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -338,7 +338,7 @@ func TestEVMEngineExecute_NonRevertFailureIsCommittedNotRejected(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res, err := eng.Execute(t.Context(), signed, uint64(1_700_000_000))
+	res, err := eng.Execute(t.Context(), signed, 1, uint64(1_700_000_000))
 	if err != nil {
 		t.Fatalf("expected a committed outcome, got error: %v", err)
 	}
@@ -381,7 +381,7 @@ func mustExecutionMetadata(t *testing.T, res endorsement.ExecutionResult) *endor
 func executeCreation(t *testing.T, dbName string, initCode []byte) endorsement.ExecutionResult {
 	t.Helper()
 	eng := newTestEngine(newTestBackend(t, dbName))
-	res, err := eng.Execute(t.Context(), signTestTx(t, types.NewContractCreation(0, big.NewInt(0), 100_000, big.NewInt(1), initCode)), 1_700_000_000)
+	res, err := eng.Execute(t.Context(), signTestTx(t, types.NewContractCreation(0, big.NewInt(0), 100_000, big.NewInt(1), initCode)), 1, 1_700_000_000)
 	if err != nil {
 		t.Fatalf("expected a committed outcome, got error: %v", err)
 	}
@@ -470,11 +470,11 @@ func TestEVMEngineExecute_PayloadIsDeterministic(t *testing.T) {
 	// LOG0 of 0 bytes, then STOP
 	signed := signTestTx(t, types.NewContractCreation(0, big.NewInt(0), 100_000, big.NewInt(1), []byte{0x60, 0x00, 0x60, 0x00, 0xa0, 0x00}))
 
-	a, err := eng.Execute(t.Context(), signed, 1_700_000_000)
+	a, err := eng.Execute(t.Context(), signed, 1, 1_700_000_000)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := eng.Execute(t.Context(), signed, 1_700_000_000)
+	b, err := eng.Execute(t.Context(), signed, 1, 1_700_000_000)
 	if err != nil {
 		t.Fatal(err)
 	}

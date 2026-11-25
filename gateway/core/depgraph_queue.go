@@ -98,7 +98,8 @@ func hashFromTxRefID(id string) (common.Hash, bool) {
 	return common.BytesToHash(raw), true
 }
 
-// txEndorser produces the read-write set the manager schedules on.
+// txEndorser produces the read-write set the manager schedules on. Satisfied by
+// *Gateway, so this endorsement uses the same block context as the real one.
 //
 // ExecuteTransaction returns an endorsement or fails outright, with no partial
 // result and one endorser's failure failing the whole call. "Endorsement" is
@@ -111,7 +112,7 @@ func hashFromTxRefID(id string) (common.Hash, bool) {
 // categories and what each should do instead are in
 // docs/TODO_ENDORSEMENT_ERROR_MODEL.md.
 type txEndorser interface {
-	ExecuteTransaction(ctx context.Context, tx *types.Transaction) (sdk.Endorsement, error)
+	ExecuteEthTx(ctx context.Context, tx *types.Transaction) (sdk.Endorsement, error)
 }
 
 // admittedTx pairs a transaction with the timestamp from when it entered the
@@ -294,9 +295,9 @@ func NewDepGraphQueue(cfg *config.DepGraphQueue) *DepGraphQueue {
 	return q
 }
 
-// Bind supplies the endorsement client and starts the goroutines that use it.
+// Bind supplies the endorser and starts the goroutines that use it.
 // It is separate from the constructor because BuildGateway only creates the
-// client after the queue.
+// gateway after the queue.
 //
 // The workers start here rather than in the constructor so that the endorser is
 // written before the goroutines that read it exist. That ordering is what makes
@@ -414,7 +415,7 @@ func (q *DepGraphQueue) submitToManager(atx admittedTx) {
 
 	// STEP 6→7 endorsement: measure how long the endorser call takes.
 	t6 := time.Now()
-	end, err := q.endorser.ExecuteTransaction(q.ctx, atx.tx)
+	end, err := q.endorser.ExecuteEthTx(q.ctx, atx.tx)
 	metrics.Default().ObserveStep(metrics.StepEndorse, time.Since(t6))
 	if err != nil {
 		metrics.Default().EndorseErrors.Inc()

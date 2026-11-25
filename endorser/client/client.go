@@ -22,6 +22,7 @@ import (
 
 	"github.com/hyperledger/fabric-x-evm/api/endorsementpb"
 	"github.com/hyperledger/fabric-x-evm/common"
+	"github.com/hyperledger/fabric-x-evm/endorser/api"
 	"github.com/hyperledger/fabric-x-sdk/endorsement"
 )
 
@@ -85,8 +86,8 @@ func (c *Client) Monitor(ctx context.Context, interval time.Duration, onChange f
 
 // Execute endorses an Ethereum transaction. A gRPC error is a transport fault;
 // application outcomes ride in the response status.
-// timestamp is the gateway-supplied wall time for EVM block.timestamp.
-func (c *Client) Execute(ctx context.Context, inv endorsement.Invocation, ethTx *types.Transaction, timestamp time.Time) (*peer.ProposalResponse, error) {
+// env is the gateway-supplied EVM block.number and block.timestamp.
+func (c *Client) Execute(ctx context.Context, inv endorsement.Invocation, ethTx *types.Transaction, env api.BlockEnv) (*peer.ProposalResponse, error) {
 	raw, err := ethTx.MarshalBinary()
 	if err != nil {
 		return nil, err
@@ -95,7 +96,8 @@ func (c *Client) Execute(ctx context.Context, inv endorsement.Invocation, ethTx 
 		EthereumTx:   raw,
 		ProposalHash: inv.ProposalHash,
 		Invocation:   invocationMsg(inv),
-		Timestamp:    timestamp.Unix(),
+		Timestamp:    env.Time.Unix(),
+		BlockNumber:  env.Number,
 	})
 	if err != nil {
 		return nil, err
@@ -173,7 +175,7 @@ func proposalResponse(resp *endorsementpb.ExecuteResponse) *peer.ProposalRespons
 // callRequest builds a CallRequest from the call message. Empty from/to are left
 // unset; gas price and value are big-endian integer bytes.
 func callRequest(msg *ethereum.CallMsg, blockNumber *big.Int) *endorsementpb.CallRequest {
-	req := &endorsementpb.CallRequest{Gas: msg.Gas, Data: msg.Data, BlockNumber: blockNumberProto(blockNumber)}
+	req := &endorsementpb.CallRequest{Gas: msg.Gas, Data: msg.Data, BlockNumber: blockNumberProto(blockNumber), Pending: api.IsPending(blockNumber)}
 	if msg.From != (ethcommon.Address{}) {
 		req.From = msg.From.Bytes()
 	}

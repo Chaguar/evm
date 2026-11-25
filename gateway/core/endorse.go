@@ -73,9 +73,9 @@ func NewEndorsementClient(local api.Service, remotes []api.Service, invBuilder e
 // goroutines were scheduled. The first failure cancels the calls still in
 // flight, which is why the error slice is scanned twice -- see that loop.
 //
-// Every endorser gets the same timestamp, since block.timestamp has to match for
-// their read-write sets to match.
-func (e EndorsementClient) ExecuteTransaction(ctx context.Context, tx *types.Transaction) (sdk.Endorsement, error) {
+// Every endorser gets the same env (block number and timestamp), since the block
+// context has to match for their read-write sets to match.
+func (e EndorsementClient) ExecuteTransaction(ctx context.Context, tx *types.Transaction, env api.BlockEnv) (sdk.Endorsement, error) {
 	// Marshal for the invocation args. A transaction that arrived over RPC and
 	// parsed cannot fail this, and no retry would help.
 	ethTxBytes, err := tx.MarshalBinary()
@@ -97,9 +97,6 @@ func (e EndorsementClient) ExecuteTransaction(ctx context.Context, tx *types.Tra
 		return sdk.Endorsement{}, err
 	}
 
-	// Single timestamp for all endorsers so RWsets match.
-	reqTime := time.Now()
-
 	// Derive a cancellable context so goroutines can stop early on error
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -112,7 +109,7 @@ func (e EndorsementClient) ExecuteTransaction(ctx context.Context, tx *types.Tra
 		processEndorsement := func(index int, endorser api.Service) {
 			// STEP 12: individual endorser RPC – measure the round-trip duration.
 			t12 := time.Now()
-			pResp, err := endorser.Execute(ctx, inv, tx, reqTime)
+			pResp, err := endorser.Execute(ctx, inv, tx, env)
 			metrics.Default().ObserveStep(metrics.StepEndorseRPC, time.Since(t12))
 			if err != nil {
 				// A Go error is a transport/delivery failure (e.g. gRPC), not a tx outcome.

@@ -20,6 +20,7 @@ import (
 	"github.com/hyperledger/fabric-lib-go/common/flogging"
 	"github.com/hyperledger/fabric-protos-go-apiv2/peer"
 	"github.com/hyperledger/fabric-x-evm/common"
+	"github.com/hyperledger/fabric-x-evm/endorser/api"
 	"github.com/hyperledger/fabric-x-evm/endorser/config"
 	"github.com/hyperledger/fabric-x-evm/endorser/execution"
 	"github.com/hyperledger/fabric-x-sdk/endorsement"
@@ -43,9 +44,9 @@ type Endorser struct {
 // EVMEngineInterface defines the interface for EVM execution engines.
 // This allows both *EVMEngine and *testimpl.EVMEngineWrapper to be used.
 type EVMEngineInterface interface {
-	// Execute runs a state-changing tx. blockTime is the Unix second used as
-	// EVM block.timestamp and must be non-zero (gateway always supplies it).
-	Execute(ctx context.Context, tx *types.Transaction, blockTime uint64) (endorsement.ExecutionResult, error)
+	// Execute runs a state-changing tx with the given EVM block.number and
+	// block.timestamp (Unix second, must be non-zero; gateway always supplies it).
+	Execute(ctx context.Context, tx *types.Transaction, blockNumber, blockTime uint64) (endorsement.ExecutionResult, error)
 	// Call returns return data and the EVM gas the simulation needed before
 	// EIP-3529 refunds are credited.
 	Call(msg ethereum.CallMsg, blockNumber *big.Int) (ret []byte, maxUsedGas uint64, err error)
@@ -77,20 +78,26 @@ func New(engine *execution.EVMEngine, builder endorsement.Builder, cfg config.En
 // Reverts are endorsed and submitted (so the receipt records status=0); client-caused failures
 // (invalid tx or failed execution) surface as a non-2xx status that CreateSignedTx won't submit.
 //
-// timestamp is the gateway-supplied wall time used as EVM block.timestamp.
-// It is required, validated against the endorser's clock skew window, and applied as-is
-// (no clamping) so all endorsers share the same value.
-func (f *Endorser) Execute(ctx context.Context, inv endorsement.Invocation, ethTx *types.Transaction, timestamp time.Time) (*peer.ProposalResponse, error) {
-	logger.Debugf("Endorser.Execute() called with tx=%s timestamp=%s", ethTx.Hash().Hex(), timestamp.UTC().Format(time.RFC3339))
-	if err := validateRequestTimestamp(timestamp, f.clock(), f.maxFuture, f.maxPast); err != nil {
+// env is the gateway-supplied EVM block.number and block.timestamp. Both are required and
+// applied as-is (no clamping) so all endorsers share the same values. The timestamp is
+// validated against the clock skew window; the block number is trusted (see
+// docs/COMPATIBILITY.md).
+func (f *Endorser) Execute(ctx context.Context, inv endorsement.Invocation, ethTx *types.Transaction, env api.BlockEnv) (*peer.ProposalResponse, error) {
+	logger.Debugf("Endorser.Execute() called with tx=%s blockNumber=%d timestamp=%s", ethTx.Hash().Hex(), env.Number, env.Time.UTC().Format(time.RFC3339))
+	if err := validateRequestTimestamp(env.Time, f.clock(), f.maxFuture, f.maxPast); err != nil {
 		// Application outcome: invalid request from a misbehaving/skewed gateway.
 		logger.Warnf("Endorser.Execute() tx=%s invalid timestamp: %v", ethTx.Hash().Hex(), err)
 		return response(nil, execution.NewTxRejected(err)), nil
 	}
+	if env.Number == 0 {
+		// The gateway predates the field; retrying does not help.
+		logger.Warnf("Endorser.Execute() tx=%s missing block number", ethTx.Hash().Hex())
+		return response(nil, execution.NewTxRejected(fmt.Errorf("request block number is required"))), nil
+	}
 
-	blockTime := uint64(timestamp.Unix())
+	blockTime := uint64(env.Time.Unix())
 	// Signature and nonce are validated inside the engine during execution.
-	res, err := f.Engine.Execute(ctx, ethTx, blockTime)
+	res, err := f.Engine.Execute(ctx, ethTx, env.Number, blockTime)
 	if err != nil {
 		logger.Warnf("Endorser.Execute() tx=%s execution error: %v", ethTx.Hash().Hex(), err)
 		return response(nil, err), nil

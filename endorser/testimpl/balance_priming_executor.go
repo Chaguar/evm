@@ -8,6 +8,7 @@ package testimpl
 
 import (
 	"context"
+	"math/big"
 	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -80,7 +81,7 @@ func NewBalancePrimingExecutor(
 		)
 	}
 
-	executor, err := execution.NewExecutor(finalStateDB, reader, nil, uint64(1_700_000_000), evmConfig)
+	executor, err := execution.NewExecutor(finalStateDB, reader, new(big.Int).SetUint64(reader.BlockNumber()), uint64(1_700_000_000), evmConfig)
 	if err != nil {
 		reader.Close()
 		return nil, err
