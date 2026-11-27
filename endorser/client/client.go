@@ -18,7 +18,9 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/hyperledger/fabric-protos-go-apiv2/peer"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/status"
 
 	"github.com/hyperledger/fabric-x-evm/api/endorsementpb"
 	"github.com/hyperledger/fabric-x-evm/common"
@@ -120,7 +122,7 @@ func (c *Client) Call(ctx context.Context, msg *ethereum.CallMsg, blockNumber *b
 func (c *Client) BalanceAt(ctx context.Context, account ethcommon.Address, blockNumber *big.Int) (*big.Int, error) {
 	resp, err := c.rpc.BalanceAt(ctx, &endorsementpb.BalanceRequest{Account: account.Bytes(), BlockNumber: blockNumberProto(blockNumber)})
 	if err != nil {
-		return nil, err
+		return nil, stateError(err)
 	}
 	return new(big.Int).SetBytes(resp.GetBalance()), nil
 }
@@ -128,7 +130,7 @@ func (c *Client) BalanceAt(ctx context.Context, account ethcommon.Address, block
 func (c *Client) StorageAt(ctx context.Context, account ethcommon.Address, key ethcommon.Hash, blockNumber *big.Int) ([]byte, error) {
 	resp, err := c.rpc.StorageAt(ctx, &endorsementpb.StorageRequest{Account: account.Bytes(), Key: key.Bytes(), BlockNumber: blockNumberProto(blockNumber)})
 	if err != nil {
-		return nil, err
+		return nil, stateError(err)
 	}
 	return resp.GetValue(), nil
 }
@@ -136,7 +138,7 @@ func (c *Client) StorageAt(ctx context.Context, account ethcommon.Address, key e
 func (c *Client) CodeAt(ctx context.Context, account ethcommon.Address, blockNumber *big.Int) ([]byte, error) {
 	resp, err := c.rpc.CodeAt(ctx, &endorsementpb.CodeRequest{Account: account.Bytes(), BlockNumber: blockNumberProto(blockNumber)})
 	if err != nil {
-		return nil, err
+		return nil, stateError(err)
 	}
 	return resp.GetCode(), nil
 }
@@ -144,9 +146,19 @@ func (c *Client) CodeAt(ctx context.Context, account ethcommon.Address, blockNum
 func (c *Client) NonceAt(ctx context.Context, account ethcommon.Address, blockNumber *big.Int) (uint64, error) {
 	resp, err := c.rpc.NonceAt(ctx, &endorsementpb.NonceRequest{Account: account.Bytes(), BlockNumber: blockNumberProto(blockNumber)})
 	if err != nil {
-		return 0, err
+		return 0, stateError(err)
 	}
 	return resp.GetNonce(), nil
+}
+
+// stateError undoes the server's stateError: OutOfRange is a height the
+// endorser's store doesn't hold, so it becomes an error that matches
+// state.ErrHistoryUnavailable. Anything else is returned as is.
+func stateError(err error) error {
+	if s, ok := status.FromError(err); ok && s.Code() == codes.OutOfRange {
+		return common.HistoryUnavailable(s.Message())
+	}
+	return err
 }
 
 // invocationMsg maps the endorsement invocation onto its wire message.

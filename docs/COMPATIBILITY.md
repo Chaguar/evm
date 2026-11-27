@@ -475,6 +475,7 @@ receive standard Ethereum codes.
 | Malformed input (bad hex, unparseable raw tx, invalid call args) | `-32602` Invalid params | |
 | Validation rejection (nonce, intrinsic gas, funds, type, sender, EIP-3860, unprotected) | `-32003` Transaction rejected | |
 | `eth_call` revert | `-32000` Execution reverted | `data` carries the raw revert payload (hex) |
+| State at a block the endorser doesn't hold (`eth_call`, `eth_estimateGas`, `eth_getBalance`, `eth_getCode`, `eth_getStorageAt`, `eth_getTransactionCount`) | `-32000` | `"historical state is not available: <detail>"` |
 | Backend lookup / endorser / orderer failure | `-32603` Internal error | |
 
 For a reverted `eth_call` the gateway returns:

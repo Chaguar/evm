@@ -14,7 +14,8 @@ SPDX-License-Identifier: LGPL-3.0-or-later
 //	-32602 Invalid params         (malformed inputs from the caller)
 //	-32603 Internal error         (unexpected backend failures)
 //	-32003 Transaction rejected   (txpool rules: nonce, gas, funds, etc.)
-//	-32000 Generic server error   (used for execution reverted; carries data)
+//	-32000 Generic server error   (execution reverted, which carries data;
+//	                              historical state not available)
 package rpcerr
 
 import "fmt"
@@ -27,6 +28,7 @@ const (
 	CodeTxRejected        = -32003
 	CodeLimitExceeded     = -32005
 	CodeExecutionReverted = -32000
+	CodeServerError       = -32000
 )
 
 // Error is a JSON-RPC error with a code, satisfying rpc.Error.
@@ -98,4 +100,15 @@ func ExecutionError(msg string) error {
 // (too many filters or subscriptions).
 func LimitExceeded(format string, args ...any) error {
 	return &Error{Code: CodeLimitExceeded, Message: fmt.Sprintf(format, args...)}
+}
+
+// HistoryUnavailable returns -32000 for a block whose state the endorser no
+// longer holds (or, on a query-service endorser, any explicit block). detail
+// says which block and what is held; it may be empty.
+func HistoryUnavailable(detail string) error {
+	msg := "historical state is not available"
+	if detail != "" {
+		msg += ": " + detail
+	}
+	return &Error{Code: CodeServerError, Message: msg}
 }

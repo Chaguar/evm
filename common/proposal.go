@@ -10,9 +10,10 @@ package common
 const ProposalTypeEVMTx = "evm_tx"
 
 const (
-	StatusOK          int32 = 200
-	StatusEVMRevert   int32 = 201
-	StatusExecFailure int32 = 202 // valid tx whose EVM execution failed (out of gas, invalid opcode, ...); mined with a failed receipt, like StatusEVMRevert
-	StatusTxRejected  int32 = 400 // invalid tx, rejected before execution (nonce, funds, intrinsic gas, ...)
-	StatusServerError int32 = 500
+	StatusOK                 int32 = 200
+	StatusEVMRevert          int32 = 201
+	StatusExecFailure        int32 = 202 // valid tx whose EVM execution failed (out of gas, invalid opcode, ...); mined with a failed receipt, like StatusEVMRevert
+	StatusTxRejected         int32 = 400 // invalid tx, rejected before execution (nonce, funds, intrinsic gas, ...)
+	StatusHistoryUnavailable int32 = 410 // store doesn't hold state at the requested height (call only)
+	StatusServerError        int32 = 500
 )

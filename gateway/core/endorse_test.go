@@ -24,6 +24,7 @@ import (
 	"github.com/hyperledger/fabric-x-evm/gateway/domain"
 	"github.com/hyperledger/fabric-x-sdk/endorsement"
 	"github.com/hyperledger/fabric-x-sdk/endorsement/fabricx"
+	"github.com/hyperledger/fabric-x-sdk/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -506,5 +507,42 @@ func TestExecuteTransaction_RejectionSurvivesCancellationOfOtherEndorsers(t *tes
 				t.Errorf("error = %q, want the rejection reason", err.Error())
 			}
 		})
+	}
+}
+
+// A height the endorser doesn't hold comes back as an error matching
+// state.ErrHistoryUnavailable, with the endorser's message.
+func TestCallContract_HistoryUnavailable(t *testing.T) {
+	const msg = "state: history unavailable at requested height: block 5"
+	c := newClient(&stubEndorser{
+		callErr: &common.CallError{Status: common.StatusHistoryUnavailable, Message: msg},
+	})
+
+	_, err := c.CallContract(context.Background(), ethereum.CallMsg{}, big.NewInt(5))
+	if !errors.Is(err, state.ErrHistoryUnavailable) {
+		t.Fatalf("err = %v, want it to match state.ErrHistoryUnavailable", err)
+	}
+	if err.Error() != msg {
+		t.Errorf("message = %q, want %q", err.Error(), msg)
+	}
+}
+
+// EstimateGas stops at the first probe instead of escalating: more gas can't
+// bring back state the endorser doesn't hold.
+func TestEstimateGas_HistoryUnavailableStopsAtFirstProbe(t *testing.T) {
+	probes := 0
+	c := newClient(&stubEndorser{
+		callFunc: func(uint64) ([]byte, uint64, error) {
+			probes++
+			return nil, 0, &common.CallError{Status: common.StatusHistoryUnavailable, Message: "state: history unavailable at requested height"}
+		},
+	})
+
+	_, err := c.EstimateGas(context.Background(), ethereum.CallMsg{}, big.NewInt(5))
+	if !errors.Is(err, state.ErrHistoryUnavailable) {
+		t.Fatalf("err = %v, want it to match state.ErrHistoryUnavailable", err)
+	}
+	if probes != 1 {
+		t.Errorf("probes = %d, want 1", probes)
 	}
 }

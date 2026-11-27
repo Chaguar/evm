@@ -178,7 +178,7 @@ func (api *EthAPI) GetBalance(ctx context.Context, address common.Address, block
 	b, err := api.b.BalanceAt(ctx, address, blockNum)
 	if err != nil {
 		logger.Warnf("EthAPI.GetBalance() returning error: %v", err)
-		return nil, err
+		return nil, classifyStateError(err)
 	}
 	result := (*hexutil.Big)(b)
 	logger.Debugf("EthAPI.GetBalance() returning: %s", result.String())
@@ -196,7 +196,7 @@ func (api *EthAPI) GetCode(ctx context.Context, addr common.Address, block rpc.B
 	code, err := api.b.CodeAt(ctx, addr, blockNum)
 	if err != nil {
 		logger.Warnf("EthAPI.GetCode() returning error: %v", err)
-		return nil, err
+		return nil, classifyStateError(err)
 	}
 	result := (hexutil.Bytes)(code)
 	logger.Debugf("EthAPI.GetCode() returning: %s (len=%d)", result.String(), len(result))
@@ -239,7 +239,7 @@ func (api *EthAPI) GetStorageAt(ctx context.Context, addr common.Address, hexSlo
 	data, err := api.b.StorageAt(ctx, addr, slot, blockNum)
 	if err != nil {
 		logger.Warnf("EthAPI.GetStorageAt() returning error: %v", err)
-		return nil, err
+		return nil, classifyStateError(err)
 	}
 	result := (hexutil.Bytes)(data)
 	logger.Debugf("EthAPI.GetStorageAt() returning: %s", result.String())
@@ -257,7 +257,7 @@ func (api *EthAPI) GetTransactionCount(ctx context.Context, address common.Addre
 	nonce, err := api.b.NonceAt(ctx, address, blockNum)
 	if err != nil {
 		logger.Warnf("EthAPI.GetTransactionCount() returning error: %v", err)
-		return nil, err
+		return nil, classifyStateError(err)
 	}
 	n := hexutil.Uint64(nonce)
 	logger.Debugf("EthAPI.GetTransactionCount() returning: %d", n)

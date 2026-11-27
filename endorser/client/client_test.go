@@ -9,6 +9,7 @@ package client
 import (
 	"bytes"
 	"context"
+	"errors"
 	"math/big"
 	"net"
 	"testing"
@@ -26,6 +27,7 @@ import (
 	"github.com/hyperledger/fabric-x-evm/api/endorsementpb"
 	"github.com/hyperledger/fabric-x-evm/common"
 	"github.com/hyperledger/fabric-x-sdk/endorsement"
+	"github.com/hyperledger/fabric-x-sdk/state"
 )
 
 // mockServer is an EvmEndorsement server returning fixed responses (or gRPC
@@ -253,5 +255,27 @@ func TestStateReaders_TransportErrors(t *testing.T) {
 	}
 	if _, err := c.NonceAt(ctx, addr, nil); status.Code(err) != codes.Internal {
 		t.Errorf("nonce err = %v", err)
+	}
+}
+
+// OutOfRange is the server's encoding of state.ErrHistoryUnavailable: the
+// readers turn it back into an error that matches it, with the server's message.
+func TestStateReaders_OutOfRangeIsHistoryUnavailable(t *testing.T) {
+	const msg = "state: history unavailable at requested height: block 5"
+	c := newClient(t, &mockServer{readErr: status.Error(codes.OutOfRange, msg)})
+	ctx := context.Background()
+	addr := ethcommon.Address{}
+
+	_, errBalance := c.BalanceAt(ctx, addr, nil)
+	_, errStorage := c.StorageAt(ctx, addr, ethcommon.Hash{}, nil)
+	_, errCode := c.CodeAt(ctx, addr, nil)
+	_, errNonce := c.NonceAt(ctx, addr, nil)
+	for name, err := range map[string]error{"balance": errBalance, "storage": errStorage, "code": errCode, "nonce": errNonce} {
+		if !errors.Is(err, state.ErrHistoryUnavailable) {
+			t.Errorf("%s: err = %v, want it to match state.ErrHistoryUnavailable", name, err)
+		}
+		if err != nil && err.Error() != msg {
+			t.Errorf("%s: message = %q, want %q", name, err.Error(), msg)
+		}
 	}
 }

@@ -14,6 +14,7 @@ The single source of truth in code is [`gateway/api/rpcerr`](../gateway/api/rpce
 | `-32602` | Invalid params | Malformed caller input — bad raw-tx bytes, unparseable hex args (`from`, `gas`, `gasPrice`, `value`, `input`/`data`, `maxFeePerGas`, `maxPriorityFeePerGas`). |
 | `-32603` | Internal error | Unexpected backend failure: state-lookup fault (e.g. nonce lookup), endorser unreachable, or any error that has no more specific classification. |
 | `-32003` | Transaction rejected | Pre-flight validation rule violation: nonce too low, intrinsic gas, insufficient funds, unsupported tx type, init-code size exceeded (EIP-3860), invalid sender, unprotected (non-EIP-155) tx. |
+| `-32000` | Historical state not available | A state read at a block the endorser's store doesn't hold: below its retained window, or any explicit block on a query-service endorser. Message `"historical state is not available"`, followed by the store's detail when it gives one (e.g. `": block 5 (retained history starts at 10, head is 20)"`). |
 | `-32000` | Execution reverted | EVM revert during `eth_call`. The `data` field carries the raw revert payload, hex-encoded; the `message` field carries the formatted reason (`"execution reverted: <abi reason>"` or just `"execution reverted"` when the payload cannot be ABI-decoded). |
 
 ## Mapping by RPC method
@@ -40,6 +41,7 @@ The single source of truth in code is [`gateway/api/rpcerr`](../gateway/api/rpce
 |------|-----:|
 | Bad hex in `argsToCallMsg` | `-32602` |
 | EVM revert (`*domain.RevertError`) | `-32000` (with revert payload as `data`) |
+| Historical state not available (`state.ErrHistoryUnavailable`) | `-32000` |
 | Endorser / backend failure | `-32603` |
 
 ### `eth_estimateGas`
@@ -51,13 +53,15 @@ so it inherits the `eth_call` mapping:
 |------|-----:|
 | Bad hex in call args | `-32602` |
 | EVM revert (`*domain.RevertError`) | `-32000` (with revert payload as `data`) |
+| Historical state not available (`state.ErrHistoryUnavailable`) | `-32000`, without escalating the gas |
 | Endorser / backend failure | `-32603` |
 
 ### Read-side methods (`eth_getBalance`, `eth_getCode`, `eth_getStorageAt`, `eth_getTransactionCount`, etc.)
 
-Backend errors flow through unchanged today and surface as `-32603`. A future PR
-may classify state-lookup failures distinctly; until then, treat any error from a
-read-side method as `Internal`.
+| Cause | Code |
+|------|-----:|
+| Historical state not available (`state.ErrHistoryUnavailable`) | `-32000` |
+| Any other backend error | `-32000` (geth's default for an untyped error), with the error text as message |
 
 ## Examples
 

@@ -23,6 +23,7 @@ import (
 	"github.com/hyperledger/fabric-x-evm/endorser/config"
 	"github.com/hyperledger/fabric-x-evm/endorser/execution"
 	"github.com/hyperledger/fabric-x-sdk/endorsement"
+	"github.com/hyperledger/fabric-x-sdk/state"
 )
 
 var logger = flogging.MustGetLogger("endorser.core")
@@ -164,11 +165,14 @@ func (f *Endorser) NonceAt(ctx context.Context, account ethcommon.Address, block
 	return f.Engine.NonceAt(ctx, account, blockNumber)
 }
 
-// classify maps an engine error to a status code. A revert is a committed
-// outcome; an *execution.ExecFailure is a valid tx whose EVM execution failed;
+// classify maps an engine error to a status code. A height the store doesn't
+// hold is StatusHistoryUnavailable; a revert is a committed outcome; an *execution.ExecFailure is a valid tx whose EVM execution failed;
 // an *execution.TxRejected is an invalid client tx; anything else is a
 // server-side fault.
 func classify(err error) int32 {
+	if errors.Is(err, state.ErrHistoryUnavailable) {
+		return common.StatusHistoryUnavailable
+	}
 	if errors.Is(err, vm.ErrExecutionReverted) {
 		return common.StatusEVMRevert
 	}
