@@ -141,6 +141,39 @@ func TestLogsFromBlock_HappyAndSkips(t *testing.T) {
 	}
 }
 
+// Live filter logs must carry the block timestamp, same as eth_getLogs after #210.
+func TestLogsFromBlock_SetsBlockTimestamp(t *testing.T) {
+	addr := common.HexToAddress("0x00000000000000000000000000000000000000aa")
+	rawTx := mustEthTxBytes(t)
+	events := mustLogEvents(t, []fc.Log{{
+		Address: addr.Bytes(),
+		Topics:  [][]byte{common.HexToHash("0xdead").Bytes()},
+		Data:    []byte{0x01},
+	}})
+
+	b := blocks.Block{
+		Number:    5,
+		Hash:      bytes32(0x55),
+		Timestamp: 1700000123,
+		Transactions: []blocks.Transaction{{
+			Number:    1,
+			Status:    blocks.StatusCommitted,
+			EventName: fc.ProposalTypeEVMTx,
+			InputArgs: [][]byte{rawTx},
+			Payload:   mustPayload(t, succeeded),
+			Event:     events,
+		}},
+	}
+
+	got := logsFromBlock(b)
+	if len(got) != 1 {
+		t.Fatalf("len=%d want 1", len(got))
+	}
+	if got[0].BlockTimestamp != 1700000123 {
+		t.Fatalf("BlockTimestamp=%d want 1700000123", got[0].BlockTimestamp)
+	}
+}
+
 // Only a successful execution emits logs, whatever the event carries.
 func TestLogsFromBlock_UnsuccessfulSkipped(t *testing.T) {
 	rawTx := mustEthTxBytes(t)
