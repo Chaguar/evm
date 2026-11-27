@@ -24,6 +24,8 @@ committer:
 
 gateway:
   listen: "0.0.0.0:8545"
+  # Prometheus scrape endpoint (separate from JSON-RPC). Empty / omitted = off.
+  # metrics-listen: "0.0.0.0:2112"
 
   # Host header allowlist for the JSON-RPC server (DNS-rebinding guard); IP
   # hosts (127.0.0.1, 10.0.0.5, ...) are always allowed regardless. Defaults

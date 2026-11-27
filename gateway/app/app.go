@@ -34,6 +34,7 @@ import (
 	"github.com/hyperledger/fabric-x-evm/gateway/api/filters"
 	"github.com/hyperledger/fabric-x-evm/gateway/config"
 	"github.com/hyperledger/fabric-x-evm/gateway/core"
+	"github.com/hyperledger/fabric-x-evm/gateway/metrics"
 	"github.com/hyperledger/fabric-x-evm/gateway/storage"
 	"github.com/hyperledger/fabric-x-evm/gateway/testimpl"
 	"github.com/hyperledger/fabric-x-evm/gateway/testimpl/primer"
@@ -53,6 +54,7 @@ type App struct {
 	filterAPI     *filters.FilterAPI
 	rpcServer     *rpc.Server
 	httpServer    *http.Server
+	metricsServer *http.Server
 }
 
 // Gateway returns the inner gateway, e.g. for use in tests.
@@ -384,6 +386,17 @@ func (a *App) Run(ctx context.Context) error {
 		return nil
 	})
 
+	if addr := a.cfg.Gateway.MetricsListen; addr != "" {
+		a.metricsServer = newMetricsHTTPServer(addr)
+		g.Go(func() error {
+			appLogger.Infof("Prometheus metrics listening on http://%s/metrics", addr)
+			if err := a.metricsServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				return err
+			}
+			return nil
+		})
+	}
+
 	// Shutdown trigger: fires when any goroutine fails or context is canceled
 	g.Go(func() error {
 		<-gctx.Done()
@@ -391,6 +404,13 @@ func (a *App) Run(ctx context.Context) error {
 	})
 
 	return g.Wait()
+}
+
+// newMetricsHTTPServer serves metrics.Default().Handler() at /metrics.
+func newMetricsHTTPServer(addr string) *http.Server {
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", metrics.Default().Handler())
+	return &http.Server{Addr: addr, Handler: mux}
 }
 
 // Shutdown performs graceful shutdown of all application components.
@@ -405,6 +425,15 @@ func (a *App) Shutdown() error {
 			appLogger.Warnf("HTTP server shutdown error: %v", err)
 		} else {
 			appLogger.Debug("HTTP server stopped")
+		}
+	}
+
+	if a.metricsServer != nil {
+		appLogger.Debug("shutting down metrics server...")
+		if err := a.metricsServer.Shutdown(shutdownCtx); err != nil {
+			appLogger.Warnf("metrics server shutdown error: %v", err)
+		} else {
+			appLogger.Debug("metrics server stopped")
 		}
 	}
 

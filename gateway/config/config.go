@@ -98,6 +98,11 @@ type Gateway struct {
 	Identity common.IdentityConfig `mapstructure:"identity" yaml:"identity"`
 	Database DB                    `mapstructure:"database" yaml:"database"`
 
+	// MetricsListen is the address for the Prometheus scrape endpoint
+	// (for example "0.0.0.0:2112"). Empty means the endpoint is not started.
+	// Kept off the JSON-RPC listen port on purpose.
+	MetricsListen string `mapstructure:"metrics-listen" yaml:"metrics-listen"`
+
 	Orderers []common.ClientConfig `mapstructure:"orderers" yaml:"orderers"`
 
 	// Endorsers, when set, are additional remote endorsers (other orgs) the
