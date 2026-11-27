@@ -129,6 +129,7 @@ the result carries the outcome. Status codes are defined in
 | `201`  | EVM reverted; still endorsed and committed, receipt records `status=0`                  |
 | `202`  | Valid tx whose EVM execution failed without reverting (out of gas, invalid opcode, ...); still endorsed and committed, receipt records `status=0` |
 | `400`  | Invalid transaction, rejected before execution (nonce, funds, intrinsic gas, signature) |
+| `410`  | `Call` only: the endorser's store doesn't hold state at the requested block (`state.ErrHistoryUnavailable`) |
 | `500`  | Server-side fault, such as a signing failure                                            |
 
 **Everything else** travels as a gRPC status error, and only these ever surface
@@ -141,6 +142,7 @@ as a Go error:
 | `DEADLINE_EXCEEDED`  | Call timed out                                                | yes       |
 | `INTERNAL`           | Transport fault                                               | no        |
 | `RESOURCE_EXHAUSTED` | Server overloaded (rate limit or concurrent-stream limit)     | yes       |
+| `OUT_OF_RANGE`       | State readers: the store doesn't hold state at the requested block (`state.ErrHistoryUnavailable`) | no |
 
 The separation matters because a revert is a successful RPC carrying a
 committed outcome, while an unreachable endorser is not an endorsement outcome

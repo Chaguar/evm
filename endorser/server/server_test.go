@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"math/big"
 	"net"
 	"testing"
@@ -29,7 +30,9 @@ import (
 
 	"github.com/hyperledger/fabric-x-evm/api/endorsementpb"
 	"github.com/hyperledger/fabric-x-evm/common"
+	eclient "github.com/hyperledger/fabric-x-evm/endorser/client"
 	"github.com/hyperledger/fabric-x-sdk/endorsement"
+	"github.com/hyperledger/fabric-x-sdk/state"
 )
 
 // stubService is an api.Service returning fixed values, so the handlers can be
@@ -147,10 +150,13 @@ func TestNonceAt_Forwards(t *testing.T) {
 
 // A failed state read is infrastructure, not an application outcome, so every
 // reader surfaces it as a gRPC error.
-func TestReadErrors_AreGRPCErrors(t *testing.T) {
-	ctx := context.Background()
+// readCalls drives each of the four state readers, returning only the error.
+func readCalls(ctx context.Context) []struct {
+	name string
+	call func(endorsementpb.EvmEndorsementClient) error
+} {
 	addr := ethcommon.Address{}.Bytes()
-	tests := []struct {
+	return []struct {
 		name string
 		call func(endorsementpb.EvmEndorsementClient) error
 	}{
@@ -171,13 +177,85 @@ func TestReadErrors_AreGRPCErrors(t *testing.T) {
 			return err
 		}},
 	}
-	for _, tt := range tests {
+}
+
+func TestReadErrors_AreGRPCErrors(t *testing.T) {
+	for _, tt := range readCalls(context.Background()) {
 		t.Run(tt.name, func(t *testing.T) {
 			client := newTestClient(t, &stubService{readErr: errors.New("db down")})
 			if got := status.Code(tt.call(client)); got != codes.Internal {
 				t.Errorf("code = %v, want Internal", got)
 			}
 		})
+	}
+}
+
+// A height the store doesn't hold is OutOfRange, carrying the store's message,
+// so the client can turn it back into state.ErrHistoryUnavailable.
+func TestReadErrors_HistoryUnavailableIsOutOfRange(t *testing.T) {
+	readErr := fmt.Errorf("%w: block 5", state.ErrHistoryUnavailable)
+	for _, tt := range readCalls(context.Background()) {
+		t.Run(tt.name, func(t *testing.T) {
+			client := newTestClient(t, &stubService{readErr: readErr})
+			st := status.Convert(tt.call(client))
+			if st.Code() != codes.OutOfRange {
+				t.Errorf("code = %v, want OutOfRange", st.Code())
+			}
+			if st.Message() != readErr.Error() {
+				t.Errorf("message = %q, want %q", st.Message(), readErr.Error())
+			}
+		})
+	}
+}
+
+// Through the real client, the sentinel survives the hop for the state readers
+// (via OutOfRange) and for Call (via the response status).
+func TestHistoryUnavailable_RoundTrip(t *testing.T) {
+	readErr := fmt.Errorf("%w: block 5", state.ErrHistoryUnavailable)
+	svc := &stubService{
+		readErr: readErr,
+		callErr: &common.CallError{Status: common.StatusHistoryUnavailable, Message: readErr.Error()},
+	}
+	lis := bufconn.Listen(1024 * 1024)
+	gs := grpc.NewServer()
+	endorsementpb.RegisterEvmEndorsementServer(gs, New(svc, nil))
+	go func() { _ = gs.Serve(lis) }()
+	t.Cleanup(gs.Stop)
+	conn, err := grpc.NewClient("passthrough:///bufnet",
+		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) { return lis.DialContext(ctx) }),
+		grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	c := eclient.New(conn)
+	t.Cleanup(func() { _ = c.Close() })
+
+	ctx := context.Background()
+	addr := ethcommon.Address{}
+	block := big.NewInt(5)
+	_, errBalance := c.BalanceAt(ctx, addr, block)
+	_, errStorage := c.StorageAt(ctx, addr, ethcommon.Hash{}, block)
+	_, errCode := c.CodeAt(ctx, addr, block)
+	_, errNonce := c.NonceAt(ctx, addr, block)
+	_, _, errCall := c.Call(ctx, &ethereum.CallMsg{}, block)
+	for name, err := range map[string]error{"balance": errBalance, "storage": errStorage, "code": errCode, "nonce": errNonce, "call": errCall} {
+		if err == nil {
+			t.Errorf("%s: expected an error", name)
+			continue
+		}
+		if name == "call" {
+			ce, ok := errors.AsType[*common.CallError](err)
+			if !ok || ce.Status != common.StatusHistoryUnavailable {
+				t.Errorf("call: err = %v, want a CallError with StatusHistoryUnavailable", err)
+			}
+			continue
+		}
+		if !errors.Is(err, state.ErrHistoryUnavailable) {
+			t.Errorf("%s: err = %v, want it to match state.ErrHistoryUnavailable", name, err)
+		}
+		if err.Error() != readErr.Error() {
+			t.Errorf("%s: message = %q, want %q", name, err.Error(), readErr.Error())
+		}
 	}
 }
 

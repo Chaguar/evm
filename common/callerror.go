@@ -6,6 +6,8 @@ SPDX-License-Identifier: LGPL-3.0-or-later
 
 package common
 
+import "github.com/hyperledger/fabric-x-sdk/state"
+
 // CallError is the application outcome of a failed read-only call, carrying the
 // same status/message/payload the endorser would otherwise put in a response.
 // It lets the endorser report a revert or an execution failure without the
@@ -21,3 +23,15 @@ func (e *CallError) Error() string { return e.Message }
 
 // Reverted reports whether the call failed with an EVM revert.
 func (e *CallError) Reverted() bool { return e.Status == StatusEVMRevert }
+
+// HistoryUnavailable rebuilds a state.ErrHistoryUnavailable that crossed a
+// boundary keeping only its message (a call status, a gRPC status). The result
+// prints msg as is and matches errors.Is(err, state.ErrHistoryUnavailable).
+func HistoryUnavailable(msg string) error {
+	return &historyUnavailableError{msg: msg}
+}
+
+type historyUnavailableError struct{ msg string }
+
+func (e *historyUnavailableError) Error() string { return e.msg }
+func (e *historyUnavailableError) Unwrap() error { return state.ErrHistoryUnavailable }

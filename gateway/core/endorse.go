@@ -235,6 +235,10 @@ func (e *EndorsementClient) EstimateGas(ctx context.Context, args ethereum.CallM
 		if !isCallErr {
 			return 0, false, fmt.Errorf("process call: %w", err)
 		}
+		if callErr.Status == common.StatusHistoryUnavailable {
+			// No amount of gas brings back state the endorser doesn't hold.
+			return 0, false, common.HistoryUnavailable(callErr.Message)
+		}
 		if callErr.Reverted() && len(callErr.Data) > 0 {
 			// A revert with a reason: a real business-logic outcome that no
 			// amount of extra gas fixes, so stop instead of escalating.
@@ -275,6 +279,9 @@ func (e *EndorsementClient) call(ctx context.Context, args ethereum.CallMsg, blo
 	if !ok {
 		// Not an application outcome: a transport/delivery failure.
 		return nil, gas, fmt.Errorf("process call: %w", err)
+	}
+	if callErr.Status == common.StatusHistoryUnavailable {
+		return nil, gas, common.HistoryUnavailable(callErr.Message)
 	}
 	if callErr.Reverted() {
 		if len(callErr.Data) == 0 {

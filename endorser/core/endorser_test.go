@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"math/big"
 	"testing"
 	"time"
@@ -24,6 +25,7 @@ import (
 	"github.com/hyperledger/fabric-x-evm/endorser/config"
 	"github.com/hyperledger/fabric-x-evm/endorser/execution"
 	"github.com/hyperledger/fabric-x-sdk/endorsement"
+	"github.com/hyperledger/fabric-x-sdk/state"
 )
 
 func TestResponseStatusOK(t *testing.T) {
@@ -57,6 +59,19 @@ func TestResponseStatusTxRejected(t *testing.T) {
 
 	if resp.Response.Status != common.StatusTxRejected {
 		t.Fatalf("status = %d, want %d", resp.Response.Status, common.StatusTxRejected)
+	}
+}
+
+// A height the store doesn't hold is its own status, so the gateway can report
+// it as such instead of as a server fault.
+func TestResponseStatusHistoryUnavailable(t *testing.T) {
+	resp := response(nil, fmt.Errorf("%w: block 5", state.ErrHistoryUnavailable))
+
+	if resp.Response.Status != common.StatusHistoryUnavailable {
+		t.Fatalf("status = %d, want %d", resp.Response.Status, common.StatusHistoryUnavailable)
+	}
+	if resp.Response.Message != "state: history unavailable at requested height: block 5" {
+		t.Fatalf("message = %q", resp.Response.Message)
 	}
 }
 

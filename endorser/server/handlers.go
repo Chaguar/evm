@@ -22,6 +22,7 @@ import (
 	"github.com/hyperledger/fabric-x-evm/api/endorsementpb"
 	"github.com/hyperledger/fabric-x-evm/common"
 	"github.com/hyperledger/fabric-x-sdk/endorsement"
+	"github.com/hyperledger/fabric-x-sdk/state"
 )
 
 // Execute endorses an Ethereum transaction. Application outcomes ride in the
@@ -74,7 +75,7 @@ func (s *Server) Call(ctx context.Context, req *endorsementpb.CallRequest) (*end
 func (s *Server) BalanceAt(ctx context.Context, req *endorsementpb.BalanceRequest) (*endorsementpb.BalanceResponse, error) {
 	bal, err := s.svc.BalanceAt(ctx, ethcommon.BytesToAddress(req.GetAccount()), blockNumber(req.BlockNumber))
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "balance: %v", err)
+		return nil, stateError("balance", err)
 	}
 	return &endorsementpb.BalanceResponse{Balance: bal.Bytes()}, nil
 }
@@ -82,7 +83,7 @@ func (s *Server) BalanceAt(ctx context.Context, req *endorsementpb.BalanceReques
 func (s *Server) StorageAt(ctx context.Context, req *endorsementpb.StorageRequest) (*endorsementpb.StorageResponse, error) {
 	val, err := s.svc.StorageAt(ctx, ethcommon.BytesToAddress(req.GetAccount()), ethcommon.BytesToHash(req.GetKey()), blockNumber(req.BlockNumber))
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "storage: %v", err)
+		return nil, stateError("storage", err)
 	}
 	return &endorsementpb.StorageResponse{Value: val}, nil
 }
@@ -90,7 +91,7 @@ func (s *Server) StorageAt(ctx context.Context, req *endorsementpb.StorageReques
 func (s *Server) CodeAt(ctx context.Context, req *endorsementpb.CodeRequest) (*endorsementpb.CodeResponse, error) {
 	code, err := s.svc.CodeAt(ctx, ethcommon.BytesToAddress(req.GetAccount()), blockNumber(req.BlockNumber))
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "code: %v", err)
+		return nil, stateError("code", err)
 	}
 	return &endorsementpb.CodeResponse{Code: code}, nil
 }
@@ -98,9 +99,19 @@ func (s *Server) CodeAt(ctx context.Context, req *endorsementpb.CodeRequest) (*e
 func (s *Server) NonceAt(ctx context.Context, req *endorsementpb.NonceRequest) (*endorsementpb.NonceResponse, error) {
 	nonce, err := s.svc.NonceAt(ctx, ethcommon.BytesToAddress(req.GetAccount()), blockNumber(req.BlockNumber))
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "nonce: %v", err)
+		return nil, stateError("nonce", err)
 	}
 	return &endorsementpb.NonceResponse{Nonce: nonce}, nil
+}
+
+// stateError turns a state read failure into a gRPC status. A height the store
+// doesn't hold is OutOfRange, which the client turns back into
+// state.ErrHistoryUnavailable; anything else is Internal.
+func stateError(what string, err error) error {
+	if errors.Is(err, state.ErrHistoryUnavailable) {
+		return status.Error(codes.OutOfRange, err.Error())
+	}
+	return status.Errorf(codes.Internal, "%s: %v", what, err)
 }
 
 // blockNumber turns the optional block selector into the *big.Int the engine
