@@ -671,7 +671,14 @@ type pebbleSnapshot struct {
 
 // Get returns the record for (namespace, key) as of the snapshot's block, or
 // nil if none exists at or before it. Tombstone records are returned as-is
-// (IsDelete=true); the execution layer treats them as absent.
+// (IsDelete=true). The execution layer serves their value, which is empty, but
+// no longer reads them as absent for MVCC: since getStateFromStore began
+// deciding on the protocol rather than the flag, a tombstone read under
+// monotonic versions carries its version like any other, and blocks.MVCCValidator
+// -- which still folds a tombstone into its "no record" case -- rejects it. Under
+// Fabric-X nothing puts a tombstone here (the endorsement builder turns a delete
+// into a nil value and the decoder never rebuilds the flag), so the two sides
+// only ever meet under classic Fabric, where both still treat a delete as absent.
 func (s *pebbleSnapshot) Get(namespace, key string) (*blocks.WriteRecord, error) {
 	if s.closed.Load() {
 		return nil, errors.New("reader is closed")

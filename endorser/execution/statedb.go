@@ -36,6 +36,7 @@ package execution
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/ethereum/go-ethereum/common"
 	ethstate "github.com/ethereum/go-ethereum/core/state"
@@ -265,6 +266,24 @@ func (s *StateDB) getStateFromJournal(key string) ([]byte, bool) {
 	return w.write.Value, true
 }
 
+// tombstoneOnMonotonicReadOnce keeps the report below to one line per process:
+// the condition is systemic, and a broken store would otherwise log it on every
+// read of every emptied key.
+var tombstoneOnMonotonicReadOnce sync.Once
+
+// reportTombstoneOnMonotonicRead reports that a store returned a tombstone record
+// under Fabric-X semantics. No committed block can produce such a record, so it
+// means the store was fed a write set built outside the commit path (test-impl
+// harnesses do this deliberately) and the cross-module invariant that keeps the
+// read set valid no longer holds.
+func reportTombstoneOnMonotonicRead(namespace, key string) {
+	tombstoneOnMonotonicReadOnce.Do(func() {
+		logger.Errorf("read of a deleted record under monotonic versions: ns=%q key=%q; "+
+			"the version is attached anyway, but this store was fed a write set no committed "+
+			"block can carry (further occurrences are not logged)", namespace, key)
+	})
+}
+
 // getStateFromStore reads from the underlying ReadStore and journals the read.
 // This creates an MVCC read dependency.
 func (s *StateDB) getStateFromStore(key string) ([]byte, error) {
@@ -280,16 +299,28 @@ func (s *StateDB) getStateFromStore(key string) ([]byte, error) {
 		// (IsDelete: true with non-nil Value happens during snapshot revert)
 		val = record.Value
 
-		// Only set version in read set if the key is not marked as deleted
-		// When IsDelete is true, we want a nil version in the read set for MVCC
-		if !record.IsDelete {
-			if s.monotonicVersions {
-				read.Version = &blocks.Version{BlockNum: record.Version}
-			} else {
-				read.Version = &blocks.Version{
-					BlockNum: record.BlockNum,
-					TxNum:    record.TxNum,
-				}
+		if s.monotonicVersions {
+			// On Fabric-X a delete never removes the row: the committer sets the
+			// value to NULL and bumps the per-key version like any other write, so
+			// a record marked IsDelete is still a present row whose version must be
+			// submitted. A nil version there would fail validate_reads_ns_*, which
+			// rejects an existing row against an expected null version.
+			//
+			// Records from a committed block cannot carry IsDelete at all: the
+			// Fabric-X encoding has no delete flag, and fabricx.DecodeNamespaces
+			// does not reconstruct one. Seeing one means this store was fed a write
+			// set no block ever carried, so say so once; the version is attached
+			// either way, which keeps the read set valid regardless.
+			if record.IsDelete {
+				reportTombstoneOnMonotonicRead(s.namespace, key)
+			}
+			read.Version = &blocks.Version{BlockNum: record.Version}
+		} else if !record.IsDelete {
+			// Classic Fabric deletes remove the key, so a later read finds nothing
+			// and a nil version is how the read set says "absent when I looked".
+			read.Version = &blocks.Version{
+				BlockNum: record.BlockNum,
+				TxNum:    record.TxNum,
 			}
 		}
 	}
