@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 ---
-name: Release Fabric-X EVM Docker Image
+name: Release EVM Docker Image
 
 on:
   push:
@@ -77,10 +77,10 @@ jobs:
           platforms: linux/amd64,linux/arm64,linux/s390x
           push: true
           tags: |
-            docker.io/${{ env.IMAGE_PREFIX }}/fabric-x-evm:${{ env.VERSION }}
-            docker.io/${{ env.IMAGE_PREFIX }}/fabric-x-evm:latest
-            ghcr.io/${{ env.GHCR_PREFIX }}/fabric-x-evm:${{ env.VERSION }}
-            ghcr.io/${{ env.GHCR_PREFIX }}/fabric-x-evm:latest
+            docker.io/${{ env.IMAGE_PREFIX }}/evm:${{ env.VERSION }}
+            docker.io/${{ env.IMAGE_PREFIX }}/evm:latest
+            ghcr.io/${{ env.GHCR_PREFIX }}/evm:${{ env.VERSION }}
+            ghcr.io/${{ env.GHCR_PREFIX }}/evm:latest
           build-args: |
             VERSION=${{ env.VERSION }}
             CREATED=${{ env.CREATED }}
