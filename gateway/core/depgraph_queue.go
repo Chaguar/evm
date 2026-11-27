@@ -50,6 +50,12 @@ const (
 	// Both are guesses pending guidance from the committer side.
 	defaultBatchThreshold = 64
 	defaultBatchTimeout   = 10 * time.Millisecond
+	// defaultTrackedTimeout bounds how long a dequeued transaction may sit in
+	// tracked without a block or an explicit Complete. After this the reaper
+	// Completes it so silent orderer loss cannot strand dependents forever.
+	defaultTrackedTimeout = 2 * time.Minute
+	// minReaperInterval is the floor for how often the reaper scans tracked.
+	minReaperInterval = 10 * time.Millisecond
 	// defaultMaxMVCCRetries is how many extra attempts a transaction gets after
 	// an MVCC conflict. Small on purpose: the retries must finish before the
 	// nonce gate's reaper drops the sender's later nonces, which stay parked
@@ -146,6 +152,10 @@ type trackedTx struct {
 	tx      *types.Transaction
 	node    *dependencygraph.TransactionNode
 	readyAt time.Time // STEP 9: when the dep manager released it as clash-free
+	// dequeuedAt is when Dequeue handed the tx to a worker for submission.
+	// The tracked reaper keys its timeout on this instant (time since submit
+	// hand-off). Zero means the tx has not been dequeued yet.
+	dequeuedAt time.Time
 
 	// end is the endorsement submitToManager made, kept while endorsed so that
 	// processTx need not execute the transaction again; see ReusableEndorsement.
@@ -200,6 +210,8 @@ type DepGraphQueue struct {
 	endorseWorkers int
 	batchThreshold int
 	batchTimeout   time.Duration
+	trackedTimeout time.Duration // zero disables the reaper
+	reaperInterval time.Duration
 	maxMVCCRetries int
 
 	mu      sync.RWMutex
@@ -244,6 +256,7 @@ func NewDepGraphQueue(cfg *config.DepGraphQueue) *DepGraphQueue {
 	waitingTxsLimit := positiveOrDefault("WaitingTxsLimit", cfg.WaitingTxsLimit, defaultWaitingTxsLimit)
 	batchThreshold := positiveOrDefault("BatchThreshold", cfg.BatchThreshold, defaultBatchThreshold)
 	batchTimeout := positiveOrDefault("BatchTimeout", cfg.BatchTimeout, defaultBatchTimeout)
+	trackedTimeout := resolveTrackedTimeout(cfg.TrackedTimeout)
 	maxMVCCRetries := positiveOrDefault("MaxMVCCRetries", cfg.MaxMVCCRetries, defaultMaxMVCCRetries)
 
 	// Legal but slow, so it is worth saying out loud rather than validating away:
@@ -267,6 +280,8 @@ func NewDepGraphQueue(cfg *config.DepGraphQueue) *DepGraphQueue {
 		endorseWorkers: endorseWorkers,
 		batchThreshold: batchThreshold,
 		batchTimeout:   batchTimeout,
+		trackedTimeout: trackedTimeout,
+		reaperInterval: reaperIntervalFor(trackedTimeout),
 		maxMVCCRetries: maxMVCCRetries,
 	}
 	q.cond = sync.NewCond(&q.mu)
@@ -291,7 +306,35 @@ func NewDepGraphQueue(cfg *config.DepGraphQueue) *DepGraphQueue {
 
 	q.wg.Go(func() { mgr.Run(q.ctx) })
 	q.wg.Go(q.drainReleased)
+	if q.trackedTimeout > 0 {
+		q.wg.Go(q.reaperLoop)
+	}
 	return q
+}
+
+// resolveTrackedTimeout maps config to the reaper timeout. Zero means the
+// built-in default; a negative value disables the reaper.
+func resolveTrackedTimeout(override time.Duration) time.Duration {
+	if override < 0 {
+		return 0
+	}
+	if override == 0 {
+		return defaultTrackedTimeout
+	}
+	return override
+}
+
+// reaperIntervalFor picks how often to scan tracked. A short timeout needs a
+// short tick so tests stay snappy; a long one can afford a slower scan.
+func reaperIntervalFor(timeout time.Duration) time.Duration {
+	if timeout <= 0 {
+		return 0
+	}
+	interval := timeout / 10
+	if interval < minReaperInterval {
+		return minReaperInterval
+	}
+	return interval
 }
 
 // Bind supplies the endorsement client and starts the goroutines that use it.
@@ -590,7 +633,9 @@ func (q *DepGraphQueue) Dequeue() (*types.Transaction, bool) {
 
 	// STEP 10 (DepGraphQueue): measure how long the tx waited in the ready list
 	// after the dep manager released it (STEP 9→10), and report ready-list depth.
+	// Stamp dequeuedAt so the tracked reaper can bound silent post-submit loss.
 	if t, ok := q.tracked[tx.Hash()]; ok {
+		t.dequeuedAt = time.Now()
 		if !t.readyAt.IsZero() {
 			metrics.Default().ObserveStep(metrics.StepDepgraphPostRelease, time.Since(t.readyAt))
 		}
@@ -1040,6 +1085,55 @@ func (q *DepGraphQueue) drop(hash common.Hash) {
 		return
 	}
 	delete(q.tracked, hash)
+}
+
+// reaperLoop Completes dequeued transactions that never reached Handle or an
+// explicit Complete within trackedTimeout. That bounds silent orderer loss so
+// dependents and WaitingTxsLimit are not held forever.
+func (q *DepGraphQueue) reaperLoop() {
+	ticker := time.NewTicker(q.reaperInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-q.ctx.Done():
+			return
+		case <-ticker.C:
+			q.reapExpired()
+		}
+	}
+}
+
+// reapExpired finds dequeued tracked entries past trackedTimeout and releases
+// them with Complete semantics (untrack + release). The scan and untrack share
+// one write lock so a hash that is Completely removed and then re-enqueued
+// cannot be killed by a stale expiry decision. ForgetTx matches the detected
+// submit-failure path in BatchSubmitter.
+func (q *DepGraphQueue) reapExpired() {
+	now := time.Now()
+
+	q.mu.Lock()
+	var expired []common.Hash
+	for hash, t := range q.tracked {
+		if t.dequeuedAt.IsZero() {
+			continue
+		}
+		if now.Sub(t.dequeuedAt) >= q.trackedTimeout {
+			expired = append(expired, hash)
+		}
+	}
+	var nodes dependencygraph.TxNodeBatch
+	for _, hash := range expired {
+		nodes = append(nodes, q.untrack(hash)...)
+	}
+	q.mu.Unlock()
+
+	for _, hash := range expired {
+		depGraphLogger.Warnf(
+			"DepGraphQueue reaper: tx %s still tracked %s after dequeue; completing to free dependents",
+			hash.Hex(), q.trackedTimeout)
+		metrics.Default().ForgetTx(hash)
+	}
+	q.release(nodes)
 }
 
 // Close stops the manager and wakes anyone blocked in Dequeue. Safe to call
