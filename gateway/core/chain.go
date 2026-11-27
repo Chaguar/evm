@@ -85,6 +85,10 @@ func (c *Chain) Handle(ctx context.Context, b blocks.Block) error {
 	// Only the row is dropped: later handlers still get the whole block, so
 	// DepGraphQueue sees the conflict and retries it.
 	ebl.Transactions = withoutRetriableConflicts(ebl.Transactions)
+	// ConvertToDomain numbered over every EVM tx, including ones we just
+	// dropped. Renumber so stored receipts stay dense (0..n-1) over what
+	// eth_getBlock* actually returns after MVCC conflicts are held back.
+	densifyStoredTxIndexes(ebl.Transactions)
 
 	ebl.ParentHash = c.prevHash.Bytes()
 	ebl.StateRoot = types.EmptyRootHash[:]
@@ -125,6 +129,21 @@ func withoutRetriableConflicts(txs []domain.Transaction) []domain.Transaction {
 		kept = append(kept, tx)
 	}
 	return kept
+}
+
+// densifyStoredTxIndexes rewrites TxIndex (and matching log TxIndex / LogIndex)
+// over the transactions that will be inserted. Call after withoutRetriableConflicts.
+func densifyStoredTxIndexes(txs []domain.Transaction) {
+	logIndex := int64(0)
+	for i := range txs {
+		txIndex := int64(i)
+		txs[i].TxIndex = txIndex
+		for j := range txs[i].Logs {
+			txs[i].Logs[j].TxIndex = txIndex
+			txs[i].Logs[j].LogIndex = logIndex
+			logIndex++
+		}
+	}
 }
 
 // EnsureGenesisBlock inserts an empty block 0 if the store has no blocks yet, so
@@ -175,6 +194,10 @@ func ConvertToDomain(b blocks.Block) (domain.Block, error) {
 
 	logIndex := int64(0) // logIndex is the index of the log in the block
 	cumulativeGas := uint64(0)
+	// Ethereum transactionIndex must be dense over the EVM txs we expose
+	// (0..n-1). Fabric tx.Number can gap after config / other-namespace /
+	// non-evm envelopes are filtered; eth_getTransactionByBlock*AndIndex
+	// walks 0..txCount-1.
 	for _, tx := range b.Transactions {
 		// retrieve the Ethereum transaction from the chaincode invocation
 		ethTxBytes, ok := fc.EVMTx(tx)
@@ -189,7 +212,8 @@ func ConvertToDomain(b blocks.Block) (domain.Block, error) {
 		}
 		cumulativeGas += gasUsed
 
-		etx, err := convertTransaction(ethTxBytes, b.Hash, b.Number, tx.Number, tx.ID, status, tx.Status, tx.Event, &logIndex)
+		txIndex := int64(len(ebl.Transactions))
+		etx, err := convertTransaction(ethTxBytes, b.Hash, b.Number, txIndex, tx.ID, status, tx.Status, tx.Event, &logIndex)
 		if err != nil {
 			return domain.Block{}, fmt.Errorf("convert tx %s in block %d: %w", tx.ID, b.Number, err)
 		}
