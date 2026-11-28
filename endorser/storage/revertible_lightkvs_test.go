@@ -9,7 +9,9 @@ package storage
 import (
 	"testing"
 
+	sdk "github.com/hyperledger/fabric-x-sdk"
 	"github.com/hyperledger/fabric-x-sdk/blocks"
+	"github.com/hyperledger/fabric-x-sdk/blocks/fabricx"
 )
 
 // update (test only) atomically applies a batch of updates to the store, deriving the
@@ -60,6 +62,13 @@ func TestRevertibleLightKVS_RevertToBlock(t *testing.T) {
 		t.Fatalf("Update block 2 failed: %v", err)
 	}
 
+	// Captured before the revert: key2's version has to survive it, so that a
+	// later write to the same key carries on climbing instead of restarting.
+	preRevert, err := kvs.Get("ns1", "key2")
+	if err != nil || preRevert == nil {
+		t.Fatalf("Get key2 before revert: rec=%+v err=%v", preRevert, err)
+	}
+
 	if err := kvs.RevertToBlock(1); err != nil {
 		t.Fatalf("RevertToBlock(1) failed: %v", err)
 	}
@@ -94,6 +103,83 @@ func TestRevertibleLightKVS_RevertToBlock(t *testing.T) {
 	}
 	if record2 != nil && string(record2.Value) == "vB" {
 		t.Errorf("key2 should not retain its post-revert value, got %+v", record2)
+	}
+	// Reverted away with no live value, but not as a tombstone: a tombstone is
+	// the "no record" case to blocks.MVCCValidator, which then demands a nil
+	// read-set version that getStateFromStore does not produce under monotonic
+	// versions. See TestRevertibleLightKVS_RevertedKeyValidatesUnderFabricX.
+	if record2 != nil {
+		if len(record2.Value) != 0 {
+			t.Errorf("key2 should read back empty after revert, got %q", record2.Value)
+		}
+		if record2.IsDelete {
+			t.Error("key2 must not read back as a tombstone after revert: MVCC validation reads one as an absent key")
+		}
+		if record2.Version != preRevert.Version {
+			t.Errorf("key2 version = %d after revert, want %d: the counter must survive the revert",
+				record2.Version, preRevert.Version)
+		}
+	}
+}
+
+// TestRevertibleLightKVS_RevertedKeyValidatesUnderFabricX pins the cross-module
+// agreement that broke the Hardhat suite: after an evm_revert, a transaction that
+// reads a key created after the snapshot must still validate.
+//
+// The testnode hands this very store to fabrictest as the validator's
+// RecordGetter (see gateway/app/testnode.go), so both halves of the MVCC rule
+// read the same record. This test stands in for that arrangement: it builds the
+// read the way getStateFromStore does under monotonic versions -- version always
+// attached -- and asserts the validator accepts it. When the revert synthesized a
+// tombstone instead, the validator folded it into its "no record" case, the read
+// conflicted on every attempt, and the gateway gave up and panicked on the
+// synchronizer goroutine.
+func TestRevertibleLightKVS_RevertedKeyValidatesUnderFabricX(t *testing.T) {
+	kvs := NewRevertibleLightKVS(NewLightKVS(4))
+	ctx := t.Context()
+
+	// Block 1 is the snapshot Hardhat's loadFixture comes back to; block 2 then
+	// creates a key that the revert has to undo.
+	if err := kvs.Handle(ctx, mkBlock(1, 0, "tx1", true, "ns1",
+		blocks.KVWrite{Key: "kept", Value: []byte("v1")})); err != nil {
+		t.Fatalf("Handle block 1: %v", err)
+	}
+	if err := kvs.Handle(ctx, mkBlock(2, 0, "tx2", true, "ns1",
+		blocks.KVWrite{Key: "fresh", Value: []byte("vB")})); err != nil {
+		t.Fatalf("Handle block 2: %v", err)
+	}
+	if err := kvs.RevertToBlock(1); err != nil {
+		t.Fatalf("RevertToBlock(1): %v", err)
+	}
+
+	rec, err := kvs.Get("ns1", "fresh")
+	if err != nil {
+		t.Fatalf("Get fresh: %v", err)
+	}
+	if rec == nil {
+		t.Fatal("reverted key dropped from the store: it must stay readable so its version keeps climbing")
+	}
+
+	// Exactly what getStateFromStore journals for this read under Fabric-X.
+	read := blocks.KVRead{Key: "fresh", Version: &blocks.Version{BlockNum: rec.Version}}
+	block := blocks.Block{
+		Number: 3,
+		Transactions: []blocks.Transaction{{
+			ID:     "tx3",
+			Number: 0,
+			NsRWS: []blocks.NsReadWriteSet{{
+				Namespace: "ns1",
+				RWS:       blocks.ReadWriteSet{Reads: []blocks.KVRead{read}},
+			}},
+		}},
+	}
+
+	if _, err := fabricx.NewMVCCValidator(kvs, sdk.NoOpLogger{}).Validate(&block); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if got := block.Transactions[0].Status; got != blocks.StatusCommitted {
+		t.Errorf("read of a reverted key: status = %v (%q), want %v",
+			got, block.Transactions[0].Reason, blocks.StatusCommitted)
 	}
 }
 

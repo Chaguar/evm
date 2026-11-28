@@ -68,6 +68,9 @@ while [ $# -gt 0 ]; do
     esac
 done
 TESTNODE_PID=""
+TESTNODE_BIN="${TMPDIR:-/tmp}/fxevm_$$"
+TESTNODE_LOG="/tmp/testnode_$$.log"
+TESTNODE_DEATH_REPORTED=""
 
 # The compatible set: every test/**/*.test.js except test/account/** and
 # test/utils/Blockhash.test.js, which need the hardhat-predeploy plugin
@@ -84,20 +87,44 @@ RESULTS_DIR="${PROJECT_ROOT}/testdata/oz-hardhat-results"
 # `baseline check --suite oz-hardhat` both expect to find.
 [ "${PORT}" = "${DEFAULT_PORT}" ] || RESULTS_DIR="${RESULTS_DIR}-${PORT}"
 
+# dump_testnode_log prints the part of the testnode log that explains a failure:
+# from the first panic on (the stack trace is what matters), else the tail.
+dump_testnode_log() {
+    if grep -qE '^(panic:|fatal error:)' "${TESTNODE_LOG}" 2>/dev/null; then
+        sed -nE '/^(panic:|fatal error:)/,$p' "${TESTNODE_LOG}" | head -150
+    else
+        echo "Last 50 lines of testnode log:"
+        tail -50 "${TESTNODE_LOG}" 2>/dev/null || true
+    fi
+}
+
+# report_testnode_death reports, once, that the testnode went away, if it did:
+# Hardhat only ever sees "other side closed" / ECONNREFUSED, and the log is
+# otherwise lost with the CI runner. Returns 1 if the testnode is dead.
+report_testnode_death() {
+    if [ -z "${TESTNODE_PID}" ] || kill -0 "${TESTNODE_PID}" 2>/dev/null; then
+        return 0
+    fi
+    [ -n "${TESTNODE_DEATH_REPORTED}" ] && return 1
+    TESTNODE_DEATH_REPORTED=1
+    echo -e "\n${RED}Error: testnode exited unexpectedly (log: ${TESTNODE_LOG})${NC}" >&2
+    dump_testnode_log >&2
+    return 1
+}
+
 cleanup() {
+    report_testnode_death || true
     if [ -n "${TESTNODE_PID}" ] && kill -0 "${TESTNODE_PID}" 2>/dev/null; then
         echo -e "\n${YELLOW}Stopping testnode (PID: ${TESTNODE_PID})${NC}"
-        # Negative PID kills the whole process group. `go run` execs the compiled
-        # program as a child, so killing only the parent leaves the server
-        # orphaned and still holding the port.
-        kill -- -"${TESTNODE_PID}" 2>/dev/null || true
+        kill "${TESTNODE_PID}" 2>/dev/null || true
         wait "${TESTNODE_PID}" 2>/dev/null || true
     fi
+    rm -f "${TESTNODE_BIN}"
 }
 trap cleanup EXIT INT TERM
 
 check_prerequisites() {
-    for cmd in node npx go; do
+    for cmd in node npx go curl lsof; do
         if ! command -v "$cmd" &> /dev/null; then
             echo -e "${RED}Error: $cmd is not installed${NC}"
             exit 1
@@ -132,16 +159,17 @@ start_testnode() {
         exit 1
     fi
 
-    echo "Starting testnode on port ${PORT} (logs: /tmp/testnode_$$.log)..."
-    # Job control on, so the background job lands in its own process group and
-    # cleanup can take down go run and the server it execs together.
-    set -m
-    go run ./cmd/fxevm testnode --listen ":${PORT}" > "/tmp/testnode_$$.log" 2>&1 &
+    # Build first rather than `go run`: compile errors fail here, visibly, and $!
+    # is then the server itself, so cleanup's kill reaches it directly.
+    echo "Building fxevm..."
+    go build -o "${TESTNODE_BIN}" ./cmd/fxevm
+
+    echo "Starting testnode on port ${PORT} (logs: ${TESTNODE_LOG})..."
+    "${TESTNODE_BIN}" testnode --listen ":${PORT}" > "${TESTNODE_LOG}" 2>&1 &
     TESTNODE_PID=$!
-    set +m
 
     echo "Waiting for testnode to be ready..."
-    MAX_RETRIES=90 # give time for go mod download and build with cold cache.
+    MAX_RETRIES=30
     RETRY_COUNT=0
     while [ ${RETRY_COUNT} -lt ${MAX_RETRIES} ]; do
         if curl -s -X POST -H "Content-Type: application/json" \
@@ -152,21 +180,15 @@ start_testnode() {
             return 0
         fi
 
-        if ! kill -0 "${TESTNODE_PID}" 2>/dev/null; then
-            echo -e "\n${RED}Error: testnode process died${NC}"
-            echo "Last 50 lines of testnode log:"
-            tail -50 "/tmp/testnode_$$.log"
-            exit 1
-        fi
+        report_testnode_death || exit 1
 
         RETRY_COUNT=$((RETRY_COUNT + 1))
         echo -n "."
         sleep 1
     done
 
-    echo -e "\n${RED}Error: testnode failed to start${NC}"
-    echo "Last 50 lines of testnode log:"
-    tail -50 "/tmp/testnode_$$.log"
+    echo -e "\n${RED}Error: testnode not ready after ${MAX_RETRIES}s${NC}" >&2
+    dump_testnode_log >&2
     exit 1
 }
 
@@ -232,6 +254,8 @@ run_full_suite() {
         else
             echo -e "${YELLOW}test/${dir}: has failures (expected — see ${RESULTS_DIR}/${dir}.json)${NC}"
         fi
+        # The remaining directories would only fail against a dead node.
+        report_testnode_death || exit 1
     done
 
     echo ""

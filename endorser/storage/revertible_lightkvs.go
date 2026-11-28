@@ -215,8 +215,9 @@ func (kvs *RevertibleLightKVS) applyBlockSequential(blockNum uint64, updates []K
 //     state) but current's version info, so future writes don't collide with
 //     the real ledger's MVCC counter.
 //   - Key present only in current (written for the first time after target):
-//     it must read back absent, so mark it a tombstone, still with current's
-//     version info.
+//     it must read back with no live value, so give it a nil value -- not a
+//     tombstone, which MVCC validation treats as an absent key and so demands a
+//     nil read-set version for -- still with current's version info.
 //
 // This ensures that when we revert and simulate new transactions, the read dependencies
 // will match the actual versions in the peer's ledger, avoiding MVCC conflicts.
@@ -309,15 +310,25 @@ func (kvs *RevertibleLightKVS) RevertToBlock(blockNumber uint64) error {
 			continue
 		}
 
-		// Key was created after target snapshot: it must read back absent,
-		// but its version info still needs to track the real ledger.
+		// Key was created after target snapshot: it must read back with no live
+		// value, but its version info still needs to track the real ledger.
+		//
+		// A nil value, not a tombstone. Both forms read back empty, since
+		// getStateFromStore serves record.Value either way, but only this one
+		// survives MVCC validation under monotonic versions: blocks.MVCCValidator
+		// folds an IsDelete record into its "no record" case, which demands a nil
+		// read-set version, while getStateFromStore attaches the version of every
+		// Fabric-X read. A synthesized tombstone therefore made each such read
+		// conflict for good, exhausting the gateway's retries. No delete flag ever
+		// reaches this store under Fabric-X anyway -- the endorsement builder turns
+		// a delete into a nil value and the decoder never rebuilds the flag -- so
+		// inventing one here described a state the ledger cannot hold.
 		mergedData[key] = &ValueVersion{
 			Value:    nil,
 			BlockNum: currentValue.BlockNum,
 			TxNum:    currentValue.TxNum,
 			Version:  currentValue.Version,
 			TxID:     currentValue.TxID,
-			IsDelete: true,
 		}
 	}
 

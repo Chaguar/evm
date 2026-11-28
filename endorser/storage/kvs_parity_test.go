@@ -112,10 +112,12 @@ func forEachFreshKVS(t *testing.T, historySize int, fn func(t *testing.T, kvs KV
 	})
 }
 
-// absent reports whether a read result represents an absent key. LightKVS
-// returns nil for a deleted/missing key; the persistent backends return a
-// tombstone record with IsDelete=true. Both mean "no live value", which is how
-// the execution layer interprets them.
+// absent reports whether a read result represents a key with no live value. This
+// is a parity question only: it lets the backends agree on "nothing to serve" even
+// though some return nil and others a tombstone record with IsDelete=true. It says
+// nothing about MVCC: under Fabric-X a tombstone row still exists in the committer
+// and the execution layer attaches its version rather than treating it as absent
+// (see getStateFromStore).
 func absent(rec *blocks.WriteRecord) bool {
 	return rec == nil || rec.IsDelete
 }
@@ -817,16 +819,27 @@ func TestParityTimeTravelAcrossTombstone(t *testing.T) {
 	})
 }
 
-// simulateReadSetVersion mirrors getStateFromStore's protocol-driven version
-// selection (endorser/execution/statedb.go) so this suite can check a backend
-// against both protocols without importing the execution package. fabric-x reads
-// the backend's own per-key counter; classic Fabric reads (BlockNum, TxNum) of
-// the last write instead and never looks at the counter at all.
-func simulateReadSetVersion(rec *blocks.WriteRecord, monotonicVersions bool) (blockNum, txNum uint64) {
-	if monotonicVersions {
-		return rec.Version, 0
+// simulateReadSetVersion mirrors the protocol-driven version selection in
+// getStateFromStore (endorser/execution/statedb.go) so this suite can check a
+// backend against both protocols without importing the execution package.
+// versioned reports whether the read carries a version at all.
+//
+// Fabric-X versions every read, tombstones included: a delete leaves the row in
+// place with a NULL value and a bumped per-key counter, and the committer rejects a
+// null version against a row that exists. Classic Fabric reads the (block, tx) of
+// the last write instead, and a tombstone means the key is gone, so that read
+// carries no version. A nil record is the "absent" shape and never versioned.
+func simulateReadSetVersion(rec *blocks.WriteRecord, monotonicVersions bool) (blockNum, txNum uint64, versioned bool) {
+	if rec == nil {
+		return 0, 0, false
 	}
-	return rec.BlockNum, rec.TxNum
+	if monotonicVersions {
+		return rec.Version, 0, true
+	}
+	if rec.IsDelete {
+		return 0, 0, false
+	}
+	return rec.BlockNum, rec.TxNum, true
 }
 
 // TestParityProtocolVersionCompatibility drives each backend through a sequence
@@ -880,21 +893,30 @@ func TestParityProtocolVersionCompatibility(t *testing.T) {
 
 					wantFabricX := fabricXRef
 					fabricXRef++
-					if s.isDelete {
-						continue // absent afterward; nothing to read back
-					}
 
+					// Read back after a delete too: the whole point of the fabric-x
+					// counter is that a delete consumes a version slot and the row
+					// stays readable with it.
 					rec := mustGet(t, kvs, "ns1", "k")
-					gotBlock, gotTx := simulateReadSetVersion(rec, monotonic)
+					gotBlock, gotTx, versioned := simulateReadSetVersion(rec, monotonic)
 
 					if monotonic {
-						if gotBlock != wantFabricX || gotTx != 0 {
-							t.Errorf("after block %d: fabric-x read-set version = (%d,%d), want (%d,0)",
-								s.block, gotBlock, gotTx, wantFabricX)
+						if !versioned || gotBlock != wantFabricX || gotTx != 0 {
+							t.Errorf("after block %d (delete=%t): fabric-x read-set version = (%d,%d) versioned=%t, want (%d,0) versioned=true",
+								s.block, s.isDelete, gotBlock, gotTx, versioned, wantFabricX)
 						}
-					} else if gotBlock != s.block || gotTx != s.tx {
-						t.Errorf("after block %d: fabric read-set version = (%d,%d), want (%d,%d)",
-							s.block, gotBlock, gotTx, s.block, s.tx)
+						continue
+					}
+					if s.isDelete {
+						if versioned {
+							t.Errorf("after block %d: fabric read-set version = (%d,%d) on a deleted key, want none",
+								s.block, gotBlock, gotTx)
+						}
+						continue
+					}
+					if !versioned || gotBlock != s.block || gotTx != s.tx {
+						t.Errorf("after block %d: fabric read-set version = (%d,%d) versioned=%t, want (%d,%d) versioned=true",
+							s.block, gotBlock, gotTx, versioned, s.block, s.tx)
 					}
 				}
 			})
