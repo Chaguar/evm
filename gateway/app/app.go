@@ -375,7 +375,7 @@ func (a *App) Run(ctx context.Context) error {
 		return nil
 	})
 
-	if addr := a.cfg.Gateway.MetricsListen; addr != "" {
+	if addr := a.cfg.Monitoring.Endpoint; addr != "" {
 		a.metricsServer = newMetricsHTTPServer(addr)
 		g.Go(func() error {
 			appLogger.Infof("Prometheus metrics listening on http://%s/metrics", addr)

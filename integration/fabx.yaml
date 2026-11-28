@@ -22,10 +22,12 @@ committer:
     ca-cert-paths:
       - ../testdata/crypto/peerOrganizations/org1.example.com/tlsca/tlsca.org1.example.com-cert.pem
 
+# Prometheus scrape endpoint (same shape as the committer). Empty / omitted = off.
+# monitoring:
+#   endpoint: :2112
+
 gateway:
   listen: "0.0.0.0:8545"
-  # Prometheus scrape endpoint (separate from JSON-RPC). Empty / omitted = off.
-  # metrics-listen: "0.0.0.0:2112"
 
   # Host header allowlist for the JSON-RPC server (DNS-rebinding guard); IP
   # hosts (127.0.0.1, 10.0.0.5, ...) are always allowed regardless. Defaults
