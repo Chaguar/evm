@@ -45,6 +45,17 @@ type Config struct {
 	// Endorser configures this process's own, embedded endorser. A real
 	// deployment never embeds more than one.
 	Endorser *endorser.Endorser `mapstructure:"endorser" yaml:"endorser"`
+
+	// Monitoring configures the Prometheus scrape endpoint. Same shape as the
+	// committer sidecar (testdata/config/committer-sidecar.yaml). Empty
+	// Endpoint means the server is not started. TLS can be added later.
+	Monitoring Monitoring `mapstructure:"monitoring" yaml:"monitoring"`
+}
+
+// Monitoring is the Prometheus scrape listener. Matches the committer's
+// monitoring: endpoint block so operators see one config style.
+type Monitoring struct {
+	Endpoint string `mapstructure:"endpoint" yaml:"endpoint"`
 }
 
 // Synchronizer configures the process-wide synchronizer.

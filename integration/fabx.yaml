@@ -22,6 +22,10 @@ committer:
     ca-cert-paths:
       - ../testdata/crypto/peerOrganizations/org1.example.com/tlsca/tlsca.org1.example.com-cert.pem
 
+# Prometheus scrape endpoint (same shape as the committer). Empty / omitted = off.
+# monitoring:
+#   endpoint: :2112
+
 gateway:
   listen: "0.0.0.0:8545"
 
